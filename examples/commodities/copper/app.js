@@ -1,1 +1,1 @@
-fetch('./data.json').then(r=>r.json()).then(d=>document.querySelector('#data').textContent=`演示指数：${d.index}（仅为资源读取验证）`);
+Promise.all([fetch('./data.json').then(r=>r.json()),fetch('./data.csv').then(r=>r.text())]).then(([d,csv])=>document.querySelector('#data').textContent=`演示指数：${d.index}（仅为资源读取验证）；同目录 CSV 已读取 ${csv.length} 个字符。`);
