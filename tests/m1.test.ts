@@ -22,3 +22,17 @@ test('native and build tools, nested reports, assets and runtime lifecycle',asyn
     await app.main.inject({method:'DELETE',url:`/api/mounts/${m.id}`,headers,payload:{}});expect((await get('index.html')).statusCode).toBe(404);expect(await fs.readFile(path.join(root,'index.html'),'utf8')).toBe('<title>Home</title>');
   } finally {await app.close();await fs.rm(temp,{recursive:true,force:true});}
 });
+
+test('content index includes HTML, Markdown and CSV without indexing JSON or TXT',async()=>{
+  const temp=await fs.mkdtemp(path.join(os.tmpdir(),'agentdeck-content-'));
+  const root=path.join(temp,'project');await fs.mkdir(root);
+  for(const name of ['page.html','notes.markdown','rows.csv','data.json','notes.txt'])await fs.writeFile(path.join(root,name),'content');
+  const app=await createWorkbench({stateDir:path.join(temp,'state'),port:4310,previewPort:4311});
+  const headers={host:'127.0.0.1:4310','sec-fetch-site':'same-origin',origin:'http://127.0.0.1:4310','x-workbench':'1','content-type':'application/json'};
+  try{
+    await app.main.inject({method:'POST',url:'/api/projects',headers,payload:{name:'内容',mount:{label:'目录',absolutePath:root}}});
+    expect(app.index.all().map(e=>e.relativePath).sort()).toEqual(['notes.markdown','page.html','rows.csv']);
+    const id=app.registry.data.mounts[0].id;
+    expect((await app.preview.inject({url:`/m/${id}/data.json`,headers:{host:'127.0.0.1:4311'}})).statusCode).toBe(200);
+  }finally{await app.close();await fs.rm(temp,{recursive:true,force:true});}
+});
