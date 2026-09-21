@@ -33,9 +33,38 @@ test('production: add real projects and run native and built tools',async({page}
 test('production: append mount in UI, tree/search and overlapping tools registration',async({page})=>{
   await page.goto('/');const snap=await json(page,'/api/projects');for(const p of snap.data.projects)await json(page,`/api/projects/${p.id}`,'DELETE');await page.reload();
   const primary=path.join(temp,'manage-primary');const extra=path.join(temp,'manage-extra');await fs.mkdir(path.join(primary,'小应用'),{recursive:true});await fs.mkdir(extra,{recursive:true});await fs.writeFile(path.join(primary,'index.html'),'<title>第一个报告</title>');await fs.writeFile(path.join(primary,'小应用','native.html'),'<title>管理测试工具</title><input>');await fs.writeFile(path.join(extra,'index.html'),'<title>第二个报告</title>');
-  await add(page,'多目录项目',primary);await page.locator('aside button').filter({hasText:'多目录项目'}).click();await page.getByRole('button',{name:'管理挂载',exact:true}).click();await page.getByLabel('目录别名',{exact:true}).fill('附加目录');await page.getByLabel('真实绝对路径').fill(extra);await page.getByRole('button',{name:'确认范围并保存'}).click();await expect(page.locator('.overlay')).toHaveCount(0);await expect(page.locator('.entry').filter({hasText:'第二个报告'})).toContainText('附加目录');
+  await add(page,'多目录项目',primary);await page.locator('aside button').filter({hasText:'多目录项目'}).click();await page.getByRole('button',{name:'管理项目',exact:true}).click();await page.getByLabel('目录别名',{exact:true}).fill('附加目录');await page.getByLabel('真实绝对路径').fill(extra);await page.getByRole('button',{name:'确认范围并保存'}).click();await expect(page.locator('.overlay')).toHaveCount(0);await expect(page.locator('.entry').filter({hasText:'第二个报告'})).toContainText('附加目录');
   await page.getByLabel('搜索',{exact:true}).fill('第二个');await expect(page.locator('.entry')).toHaveCount(1);await page.getByLabel('搜索',{exact:true}).fill('');await page.locator('.directory-section > summary').click();const tree=page.locator('.mount-tree').nth(1);await tree.locator('summary').click();await tree.getByRole('button',{name:'展开目录'}).click();await expect(tree.getByRole('button',{name:'index.html',exact:true})).toBeVisible();
-  await page.getByRole('button',{name:'管理挂载',exact:true}).click();await page.getByLabel('真实绝对路径').fill(path.join(primary,'小应用'));await page.getByRole('button',{name:'确认范围并保存'}).click();await expect(page.locator('.dialog [role=alert]')).toContainText('已包含');await page.getByRole('button',{name:'标记为已有挂载的工具目录'}).click();await expect(page.locator('.overlay')).toHaveCount(0);await page.getByLabel('类型筛选').selectOption('tool');await expect(page.locator('.entry')).toHaveCount(1);await expect(page.locator('.entry')).toContainText('管理测试工具');expect((await json(page,'/api/projects')).data.mounts).toHaveLength(2);
+  await page.getByRole('button',{name:'管理项目',exact:true}).click();await page.getByLabel('真实绝对路径').fill(path.join(primary,'小应用'));await page.getByRole('button',{name:'确认范围并保存'}).click();await expect(page.locator('.dialog [role=alert]')).toContainText('已包含');await page.getByRole('button',{name:'标记为已有挂载的工具目录'}).click();await expect(page.locator('.overlay')).toHaveCount(0);await page.getByLabel('类型筛选').selectOption('tool');await expect(page.locator('.entry')).toHaveCount(1);await expect(page.locator('.entry')).toContainText('管理测试工具');expect((await json(page,'/api/projects')).data.mounts).toHaveLength(2);
+});
+
+test('production: project management entry removes registration but keeps source files',async({page})=>{
+  await page.setViewportSize({width:1440,height:900});await page.goto('/');
+  const snap=await json(page,'/api/projects');for(const p of snap.data.projects)await json(page,`/api/projects/${p.id}`,'DELETE');await page.reload();
+  const removeDir=path.join(temp,'remove-project');const keepDir=path.join(temp,'keep-project');await fs.mkdir(removeDir,{recursive:true});await fs.mkdir(keepDir,{recursive:true});
+  await fs.writeFile(path.join(removeDir,'report.html'),'<title>待移除报告</title>');await fs.writeFile(path.join(keepDir,'report.html'),'<title>保留报告</title>');
+  await add(page,'待移除',removeDir);await add(page,'保留',keepDir);
+  await page.setViewportSize({width:800,height:900});
+  await page.getByRole('combobox',{name:'切换项目'}).selectOption({label:'待移除'});
+  await page.getByRole('button',{name:'管理项目',exact:true}).click();
+  await expect(page.getByLabel('项目名称',{exact:true})).toHaveValue('待移除');
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  await page.setViewportSize({width:1440,height:900});
+  await page.locator('.entry').filter({hasText:'待移除报告'}).click();
+  await page.getByRole('button',{name:'管理项目：待移除'}).click();
+  await expect(page.getByRole('dialog',{name:'管理项目与挂载'})).toBeVisible();
+  page.once('dialog',dialog=>void dialog.dismiss());await page.getByRole('button',{name:'移除项目',exact:true}).click();
+  await expect(page.getByRole('dialog',{name:'管理项目与挂载'})).toBeVisible();
+  page.once('dialog',dialog=>void dialog.accept());await page.getByRole('button',{name:'移除项目',exact:true}).click();
+  await expect(page.getByRole('dialog',{name:'管理项目与挂载'})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'管理项目：待移除'})).toHaveCount(0);
+  await expect(page.locator('.entry').filter({hasText:'保留报告'})).toBeVisible();
+  await expect(page.locator('.entry').filter({hasText:'待移除报告'})).toHaveCount(0);
+  await expect(page.locator('.viewer iframe')).toHaveCount(0);
+  const after=(await json(page,'/api/projects')).data;
+  expect(after.projects.map((p:{name:string})=>p.name)).toEqual(['保留']);
+  expect(after.mounts).toHaveLength(1);
+  expect(await fs.readFile(path.join(removeDir,'report.html'),'utf8')).toContain('待移除报告');
 });
 
 test('production: real browser isolation, hostile Markdown, text limits, picker and cross-drive',async({page,context})=>{

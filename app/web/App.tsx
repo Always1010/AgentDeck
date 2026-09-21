@@ -148,13 +148,13 @@ export function App() {
     <aside id="project-navigation">
       <button className="add-project" onClick={() => setManage('new')}>＋ 添加项目</button>
       <nav aria-label="内容范围">{views.map(([id, name]) => <button key={id} className={!project && view === id ? 'active' : ''} aria-current={!project && view === id ? 'page' : undefined} onClick={() => { setProject(''); setView(id); setKind(''); }}>{name}</button>)}</nav>
-      <div className="project-list"><p className="nav-label">我的项目</p>{data.projects.map(p => <button className={p.id === project ? 'active' : ''} key={p.id} aria-current={p.id === project ? 'page' : undefined} onClick={() => chooseProject(p.id)}>{p.name}<small>{data.mounts.filter(m => m.projectId === p.id).length} 个目录</small></button>)}</div>
+      <div className="project-list"><p className="nav-label">我的项目</p>{data.projects.map(p => <div className="project-item" key={p.id}><button className={p.id === project ? 'active' : ''} aria-current={p.id === project ? 'page' : undefined} onClick={() => chooseProject(p.id)}>{p.name}<small>{data.mounts.filter(m => m.projectId === p.id).length} 个目录</small></button><button className="project-manage" aria-label={`管理项目：${p.name}`} onClick={() => { chooseProject(p.id); setManage('edit'); }}>管理</button></div>)}</div>
       <select className="project-picker" aria-label="切换项目" value={project} onChange={e => chooseProject(e.target.value)}><option value="">所有项目</option>{data.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
       <div className="connection">● {connection}<small>本机运行 · 原文件只读</small></div>
     </aside>
     <section className="catalog" id="content-catalog" aria-label="内容列表">
       <div className="catalog-header">
-        <header><h2>{scope}</h2>{project && <button aria-label="管理挂载" onClick={() => setManage('edit')}>管理挂载</button>}</header>
+        <header><h2>{scope}</h2>{currentProject && <button onClick={() => setManage('edit')}>管理项目</button>}</header>
         <div className="catalog-filters"><input ref={searchRef} aria-label="搜索" aria-keyshortcuts={shortcutsEnabled ? '/' : undefined} type="search" placeholder={`搜索项目、名称或路径${shortcutsEnabled ? '  /' : ''}`} value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => {
           if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229 || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.repeat) return;
           if (e.key === 'ArrowDown') { e.preventDefault(); document.querySelector<HTMLButtonElement>('.entry-list .entry')?.focus(); }
@@ -197,7 +197,7 @@ export function App() {
     {selected ? <Viewer key={selected} id={selected} signal={signal} favorite={favorites.includes(selected)} toggleFavorite={favorite} back={() => { if (standalone) location.href = '/'; else { setSelected(''); setImmersive(false); } }} navigate={navigate} /> : <section className="viewer"><div className="empty"><span className="eyebrow">YOUR FILES. IN PLACE.</span><h2>{data.projects.length ? '选择一个报告，或启动工具。' : '让每个项目拥有自己的工作台。'}</h2><p>直接阅读 HTML，运行纯前端工具。将已有目录加入项目，文件留在原位置。</p>{!data.projects.length && <button className="primary" onClick={() => setManage('new')}>添加第一个项目</button>}<p className="muted">支持多文件网页与完整构建输出。Markdown、CSV、JSON 可直接阅读。</p></div></section>}
     {toast && <div className="toast success" role="status">{toast}<button aria-label="关闭提示" onClick={() => setToast('')}>×</button></div>}
     {error && <div className="toast" role="alert">{error}<button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
-    {manage && <Management snapshot={data} project={manage === 'edit' ? currentProject : undefined} close={() => setManage(undefined)} saved={() => void reload()} />}
+    {manage && <Management snapshot={data} project={manage === 'edit' ? currentProject : undefined} close={() => setManage(undefined)} saved={() => void reload()} removed={() => { setProject(''); setView('all'); setKind(''); setSelected(''); setImmersive(false); }} />}
     {help && <ShortcutHelp close={() => setHelp(false)} enabled={shortcutsEnabled} setEnabled={setShortcutsEnabled} />}
   </div>;
 }
