@@ -144,6 +144,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
       rel = rel ? `${rel.replace(/\/$/,'')}/index.html` : 'index.html'; file = await policy.resolve(m, rel);
     }
     reply.type(mime[path.extname(file.real).toLowerCase()]).header('Content-Length', file.stat.size);
+    if(req.method==='HEAD')return reply.send();
     return reply.send(createReadStream(file.real));
   } });
   const webDir = options.webDir || path.resolve('dist/web');

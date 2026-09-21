@@ -31,3 +31,13 @@
 - 相关文件：`app/server/path-policy.ts`、`tests/security.test.ts`。
 
 
+## AD-004 — 显式 HEAD 路由仍创建正文流
+
+- 日期：2026-09-21
+- 状态：已解决
+- 现象：注入式 HTTP 测试发现显式 HEAD 路由返回 HTML 正文。
+- 原因：GET/HEAD 共用处理器未在响应头完成后提前结束 HEAD。
+- 解决方案：HEAD 只返回校验后的状态及长度/MIME，不打开正文流。
+- 验证：HEAD 正文为空、状态与 Content-Length 正确；正式模式浏览器预览响应检查通过。
+- 相关文件：`app/server/server.ts`、`tests/security.test.ts`。
+
