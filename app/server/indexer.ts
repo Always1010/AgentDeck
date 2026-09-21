@@ -29,7 +29,7 @@ export class Indexer {
       } else { title = path.posix.basename(toolRoot || '') || mount.label; }
       const kind: Entry['kind'] = toolRoot !== undefined ? 'tool' : /^html?$/.test(format) ? 'html' : /^(md|markdown)$/.test(format) ? 'markdown' : /^(csv|json)$/.test(format) ? 'data' : 'text';
       const prefs = this.registry.data.entryPreferences[id] || {};
-      result.push({id,projectId:mount.projectId,mountId:mount.id,title,kind,format,relativePath:rel,...(toolRoot!==undefined?{toolRoot}:{}),resourceRoot:toolRoot ?? (path.posix.dirname(rel)==='.'?'':path.posix.dirname(rel)),updatedAt,refreshMode:kind==='tool'?'prompt':'auto',status,candidates,...prefs});
+      result.push({id,projectId:mount.projectId,mountId:mount.id,title,kind,format,relativePath:rel,...(toolRoot!==undefined?{toolRoot}:{}),resourceRoot:path.posix.dirname(rel)==='.'?'':path.posix.dirname(rel),updatedAt,refreshMode:kind==='tool'?'prompt':'auto',status,candidates,...prefs});
     };
     const exists = async (rel: string, internal = false) => { try { return (await this.policy.resolve(mount,rel,internal)).stat.isFile(); } catch { return false; } };
     const dirs = async (rel: string) => {
