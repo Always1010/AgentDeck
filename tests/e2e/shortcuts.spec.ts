@@ -147,3 +147,11 @@ test('Markdown reading position survives keyboard immersion and standalone previ
   await expect(page.locator('.shell')).not.toHaveClass(/immersive/);
   await expect(page.locator('.markdown h1')).toHaveText('第一篇笔记');
 });
+
+test('B toggles sidebar, leaves typing alone, and preserves the current tool',async({page})=>{
+ const input=page.frameLocator('iframe').locator('#draft');await input.fill('保持输入');const sidebar=page.locator('.sidebar-toggle');await expect(sidebar).toHaveAttribute('title',/B/);await sidebar.focus();await page.keyboard.press('b');await expect(page.locator('.explorer')).toBeHidden();await expect(sidebar).toBeFocused();await page.keyboard.press('b');await expect(page.locator('.explorer')).toBeVisible();await expect(input).toHaveValue('保持输入');
+ const search=page.getByLabel('筛选文件',{exact:true});await search.focus();await page.keyboard.press('b');await expect(search).toHaveValue('b');await expect(page.locator('.explorer')).toBeVisible();await search.fill('');
+ await input.focus();await page.keyboard.press('b');await expect(input).toHaveValue('保持输入b');await expect(page.locator('.explorer')).toBeVisible();
+ await page.getByRole('button',{name:'沉浸',exact:true}).click();await page.keyboard.press('b');await expect(page.locator('.explorer')).toBeVisible();await expect(page.locator('.shell')).not.toHaveClass(/immersive/);await expect(input).toHaveValue('保持输入b');
+ await page.getByRole('button',{name:'快捷键',exact:true}).click();await page.getByLabel('启用单键快捷键').uncheck();await page.keyboard.press('Escape');await sidebar.focus();await page.keyboard.press('b');await expect(page.locator('.explorer')).toBeVisible();await expect(sidebar.locator('kbd')).toHaveCount(0);await expect(page.locator('.immersion-toggle kbd')).toHaveCount(0);
+});

@@ -1,4 +1,4 @@
-export type Shortcut = 'immersive' | 'search' | 'help' | 'escape';
+export type Shortcut = 'immersive' | 'sidebar' | 'search' | 'help' | 'escape';
 type KeyInput = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'altKey' | 'metaKey' | 'shiftKey' | 'isComposing' | 'repeat' | 'defaultPrevented' | 'keyCode'>;
 
 /** No modified browser/OS shortcuts are claimed. Escape remains available in forms. */
@@ -6,6 +6,7 @@ export function shortcutFor(event: KeyInput, editing: boolean, enabled: boolean)
   if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat || event.ctrlKey || event.altKey || event.metaKey) return;
   if (event.key === 'Escape' && !event.shiftKey) return 'escape';
   if (!enabled || editing) return;
+  if (event.key.toLowerCase() === 'b' && !event.shiftKey) return 'sidebar';
   if (event.key.toLowerCase() === 'f' && !event.shiftKey) return 'immersive';
   if (event.key === '/' && !event.shiftKey) return 'search';
   if (event.key === '?') return 'help';
