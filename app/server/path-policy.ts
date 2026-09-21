@@ -7,7 +7,7 @@ import type { Mount } from '../shared/model.js';
 export const mime: Record<string, string> = { '.html':'text/html; charset=utf-8', '.htm':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.mjs':'text/javascript; charset=utf-8', '.json':'application/json; charset=utf-8', '.csv':'text/plain; charset=utf-8', '.txt':'text/plain; charset=utf-8', '.md':'text/plain; charset=utf-8', '.markdown':'text/plain; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.gif':'image/gif', '.webp':'image/webp', '.ico':'image/x-icon', '.woff':'font/woff', '.woff2':'font/woff2', '.ttf':'font/ttf', '.otf':'font/otf', '.wasm':'application/wasm', '.pdf':'application/pdf', '.mp4':'video/mp4', '.mp3':'audio/mpeg' };
 export const inside = (root: string, target: string) => { const rel = path.relative(root, target); return rel === '' || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel)); };
 export function relative(value: string, allowEmpty = true) {
-  if ((!value && !allowEmpty) || value.includes('\\') || value.includes(':') || value.includes('\0') || value.startsWith('/') || value.split('/').some(s => s === '..' || s === '.' || /[. ]$/.test(s))) throw new AppError('INVALID_PATH', '需要安全的相对路径，不能越界');
+  if (typeof value !== 'string' || (!value && !allowEmpty) || value.includes('\\') || value.includes(':') || value.includes('\0') || value.startsWith('/') || value.split('/').some(s => s === '..' || s === '.' || /[. ]$/.test(s))) throw new AppError('INVALID_PATH', '需要安全的相对路径，不能越界');
   return value.replace(/\/$/, '');
 }
 export function hidden(rel: string, excludes: string[] = [], internalPackage = false) {
@@ -29,7 +29,8 @@ export class PathPolicy {
     const real = await fs.realpath(target);
     if (!(await fs.stat(real)).isDirectory()) throw new AppError('INVALID_PATH', '所选路径不是目录');
     const sensitive = process.platform === 'win32' ? [process.env.SystemRoot || 'C:\\Windows', process.env.ProgramFiles || 'C:\\Program Files', process.env.ProgramData || 'C:\\ProgramData'] : ['/etc','/proc','/sys','/dev','/boot'];
-    if (real === path.parse(real).root || path.relative(os.homedir(), real) === '' || sensitive.some(p => inside(p, real)) || inside(this.stateDir, real)) throw new AppError('FORBIDDEN_PATH', '请选择更具体的项目目录，系统、用户主目录及平台状态目录不能发布', 403);
+    const segments=real.slice(path.parse(real).root.length).split(path.sep).join('/');
+    if (real === path.parse(real).root || path.relative(os.homedir(), real) === '' || sensitive.some(p => inside(p, real)) || inside(this.stateDir, real) || inside(real,this.stateDir) || hidden(segments)) throw new AppError('FORBIDDEN_PATH', '请选择具体项目目录；系统、隐藏敏感目录、用户主目录以及包含平台状态的目录不能发布', 403);
     await fs.access(real, fs.constants.R_OK);
     return real;
   }
