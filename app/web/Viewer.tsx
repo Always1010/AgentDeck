@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Entry } from '../shared/model.js';
 import { api, ApiError } from './api.js';
+import { Icon } from './Icon.js';
 import { Markdown } from './Markdown.js';
 import { restoreFocus, shortcutFor } from './shortcuts.js';
 export function Viewer({id,tool,toggleTool,favorite,toggleFavorite,back,navigate}:{id:string;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;back:()=>void;navigate:(mountId:string,path:string)=>void}) {
@@ -34,9 +35,9 @@ export function Viewer({id,tool,toggleTool,favorite,toggleFavorite,back,navigate
   async function toggleSource(){if(!entry)return;try{if(!source)setText(await read(entry));setSource(!source);}catch(e){setError((e as Error).message);}}
   async function preference(patch:Partial<Entry>){try{await api(`${endpoint}/preferences`,'PATCH',patch);const e=await api<Entry>(endpoint);live.current=e;setEntry(e);}catch(e){setError((e as Error).message);}}
   const download=entry?`/api/mounts/${entry.mountId}/download?path=${encodeURIComponent(entry.relativePath)}`:'';
-  return <section className="viewer"><header className="toolbar"><div className="identity" title={entry?.relativePath}><strong>{entry?.title||'文件预览'}</strong></div><button disabled={loading} onClick={()=>void load()} title="重新加载文件">刷新</button><button aria-pressed={favorite} onClick={toggleFavorite}>{favorite?'★ 已收藏':'☆ 收藏'}</button><a href={`/preview?entry=${encodeURIComponent(id)}`} target="_blank" rel="noopener noreferrer">新标签</a><button ref={settingsButton} aria-label="更多设置" aria-expanded={settings} onClick={()=>setSettings(!settings)}>更多</button><button onClick={back} aria-label="关闭预览" title="关闭预览">×</button></header>
+  return <section className="viewer"><header className="toolbar"><div className="identity" title={entry?.relativePath}><strong>{entry?.title||'文件预览'}</strong></div><button className="icon-button" aria-label="刷新" data-tooltip="刷新文件" disabled={loading} onClick={()=>void load()}><Icon name="refresh"/></button><button className={`icon-button ${favorite?'is-favorite':''}`} aria-label={favorite?'取消收藏文件':'收藏文件'} data-tooltip={favorite?'取消收藏':'收藏'} aria-pressed={favorite} onClick={toggleFavorite}><Icon name="star" filled={favorite}/></button><a className="icon-button" aria-label="新标签" data-tooltip="在新标签中打开" href={`/preview?entry=${encodeURIComponent(id)}`} target="_blank" rel="noopener noreferrer"><Icon name="external"/></a><button className="icon-button" ref={settingsButton} aria-label="更多设置" data-tooltip="更多设置" aria-expanded={settings} onClick={()=>setSettings(!settings)}><Icon name="more"/></button><button className="icon-button" onClick={back} aria-label="关闭预览" data-tooltip="关闭预览"><Icon name="close"/></button></header>
     {settings&&<div className="viewer-settings" id="viewer-settings">{entry&&<>
-      {/^html?$/.test(entry.format)&&<button aria-pressed={tool} onClick={toggleTool}>{tool?'从工具移除':'添加到工具'}</button>}
+      {/^html?$/.test(entry.format)&&<button aria-pressed={tool} onClick={toggleTool}><Icon name="tool"/>{tool?'从工具移除':'添加到工具'}</button>}
       {!downloadOnly&&<button onClick={()=>void toggleSource()}>{source?'返回阅读':'查看源码'}</button>}
       {!/^html?$/.test(entry.format)&&!downloadOnly&&<label className="inline"><input type="checkbox" checked={entry.refreshMode==='auto'} onChange={e=>void preference({refreshMode:e.target.checked?'auto':'prompt'})}/>自动更新文本</label>}
       <button onClick={()=>{const title=prompt('显示名称',entry.title);if(title)void preference({title});}}>显示名称</button><a href={download} download>下载原文件</a>

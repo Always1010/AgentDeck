@@ -93,7 +93,7 @@ export function App() {
   return <div className={`shell ${hidden?'sidebar-hidden':''} ${immersive?'immersive':''}`} style={{'--sidebar-width':`${width}px`} as CSSProperties}>
     <header className="workspace-header"><button className="sidebar-toggle" aria-label={hidden?'展开文件侧栏':'收起文件侧栏'} aria-expanded={!hidden} onClick={()=>{if(immersive)setImmersive(false);setCollapsed(!hidden);}}>☰</button><strong className="brand">AgentDeck</strong><span className="workspace-context">本地文件工作台</span><div className="workspace-actions">
       {searchActive&&<button onClick={()=>finishSearch()}>结束筛选</button>}
-      <button ref={immersionRef} className="immersion-toggle" disabled={!selected&&!immersive} aria-label={immersive?'退出沉浸':'沉浸'} aria-pressed={immersive} onClick={toggleImmersion}>{immersive?'退出沉浸':'沉浸'}</button>
+      <button ref={immersionRef} className="immersion-toggle" disabled={!selected&&!immersive} aria-label={immersive?'退出沉浸':'沉浸'} aria-pressed={immersive} aria-keyshortcuts={shortcutsEnabled?'f':undefined} title={`${immersive?'退出沉浸':'沉浸阅读'}${shortcutsEnabled?' · F（工作台获得焦点时）':''}`} onClick={toggleImmersion}><Icon name={immersive?'collapse':'expand'}/><span>{immersive?'退出沉浸':'沉浸'}</span>{shortcutsEnabled&&<kbd aria-hidden="true">F</kbd>}</button>
       <button aria-label="快捷键" title="快捷键" onClick={()=>setHelp(true)}>?</button>
     </div></header>
     <aside className="explorer" aria-label="文件资源浏览器" aria-hidden={hidden}>
