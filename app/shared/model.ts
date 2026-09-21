@@ -16,6 +16,12 @@ export type RegistryData = z.infer<typeof registrySchema>;
 export type Entry = { id: string; projectId: string; mountId: string; title: string; kind: z.infer<typeof kindSchema>; format: string; relativePath: string; toolRoot?: string; resourceRoot: string; updatedAt: number; refreshMode: 'auto' | 'prompt'; status: 'ready' | 'pending-build' | 'choose-entry'; error?: string; candidates?: string[]; previewUrl?: string };
 export type MountState = { status: 'scanning' | 'online' | 'offline' | 'disabled'; error?: string };
 export type Snapshot = { projects: Project[]; mounts: (Mount & MountState)[]; revision: number };
-export type TreeItem = { name: string; relativePath: string; directory: boolean };
+export type TreeItem = { name: string; relativePath: string; directory: boolean; legacyIds?: string[] };
+/** Reversible references allow opening files without an index. */
+export const fileReference = (mountId: string, relativePath: string) => `file:${mountId}:${relativePath}`;
+export function parseFileReference(id: string) {
+  const match = /^file:([^:]+):(.+)$/.exec(id);
+  return match ? { mountId: match[1], relativePath: match[2] } : undefined;
+}
 export type ChangeEvent = { mountId: string; projectId: string; revision: number; paths: string[]; entryIds: string[] };
 export const previewPath = (mountId: string, path: string) => `/m/${encodeURIComponent(mountId)}/${path.split('/').map(encodeURIComponent).join('/')}`;

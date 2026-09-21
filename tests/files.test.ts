@@ -1,0 +1,43 @@
+import { beforeEach, afterEach, test, expect } from 'vitest';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { createWorkbench, type Workbench } from '../app/server/server.js';
+import { fileReference } from '../app/shared/model.js';
+import { legacyId } from '../app/server/files.js';
+let temp: string, root: string, app: Workbench, id: string;
+const headers = {host:'127.0.0.1:4310','sec-fetch-site':'same-origin',origin:'http://127.0.0.1:4310','x-workbench':'1','content-type':'application/json'};
+beforeEach(async () => {
+  temp = await fs.mkdtemp(path.join(os.tmpdir(), 'agentdeck-files-')); root = path.join(temp, 'project');
+  await fs.mkdir(path.join(root,'templates'), {recursive:true});
+  for (const [name, contents] of Object.entries({'page.html':'<title>{{Template}}</title>', 'rows.csv':'a,b', 'notes.md':'# Notes', 'code.py':'print(1)', 'binary.exe':'binary', '中文 #%.txt':'原文'})) await fs.writeFile(path.join(root,name), contents);
+  await fs.writeFile(path.join(root,'templates','child.html'), '<p>fragment</p>');
+  app = await createWorkbench({stateDir:path.join(temp,'state'),port:4310,previewPort:4311});
+  await app.main.inject({method:'POST',url:'/api/projects',headers,payload:{name:'p',mount:{label:'m',absolutePath:root}}});
+  id = app.registry.data.mounts[0].id;
+});
+afterEach(async () => { await app.close(); await fs.rm(temp,{recursive:true,force:true}); });
+test('single-level directory listing prioritizes documents and exposes code and download-only files',async () => {
+  const r = await app.main.inject({url:`/api/mounts/${id}/tree`,headers});
+  expect(r.statusCode).toBe(200);
+  const items = r.json();
+  expect(items.map((x:{name:string})=>x.name)).toEqual(['templates','notes.md','page.html','rows.csv','中文 #%.txt','binary.exe','code.py']);
+  expect(items.find((x:{name:string})=>x.name==='page.html').legacyIds).toContain(legacyId(id,'page.html'));
+  expect(JSON.stringify(items)).not.toContain('child.html');
+  expect((await app.main.inject({url:`/api/mounts/${id}/tree?path=code.py`,headers})).statusCode).toBe(400);
+});
+test('direct file references work without an indexed entry and keep legacy preferences',async () => {
+  const old = legacyId(id,'code.py');
+  await app.registry.mutate(d=>{d.entryPreferences[old]={title:'旧显示名称'};});
+  const url = `/api/entries/${encodeURIComponent(fileReference(id,'code.py'))}`;
+  const r = await app.main.inject({url,headers});
+  expect(r.statusCode).toBe(200); expect(r.json().title).toBe('旧显示名称');
+  expect((await app.main.inject({url:`/api/mounts/${id}/file?path=code.py`,headers})).json().text).toBe('print(1)');
+  expect((await app.main.inject({url:`/api/mounts/${id}/file?path=binary.exe`,headers})).statusCode).toBe(415);
+  expect((await app.main.inject({url:`/api/mounts/${id}/download?path=binary.exe`,headers})).statusCode).toBe(200);
+  expect((await app.preview.inject({url:`/m/${id}/binary.exe`,headers:{host:'127.0.0.1:4311'}})).statusCode).toBe(403);
+  await app.main.inject({method:'PATCH',url:`${url}/preferences`,headers,payload:{title:'新名称'}});
+  expect((await app.main.inject({url,headers})).json().title).toBe('新名称');
+  const unusual = await app.main.inject({url:`/api/entries/${encodeURIComponent(fileReference(id,'中文 #%.txt'))}`,headers});
+  expect(unusual.statusCode).toBe(200); expect(unusual.json().relativePath).toBe('中文 #%.txt');
+});

@@ -35,7 +35,7 @@ export class PathPolicy {
     await fs.access(real, fs.constants.R_OK);
     return real;
   }
-  async resolve(mount: Mount, rel: string, internalPackage = false) {
+  async resolve(mount: Mount, rel: string, internalPackage = false, access: 'preview' | 'file' = 'preview') {
     if (!mount.enabled) throw new AppError('MOUNT_DISABLED', '挂载已停用', 410);
     relative(rel);
     if (hidden(rel, mount.excludes, internalPackage)) throw new AppError('FORBIDDEN_FILE', '该文件在排除范围内', 403);
@@ -48,7 +48,8 @@ export class PathPolicy {
     if (!inside(root, real) || inside(this.stateDir, real)) throw new AppError('FORBIDDEN_PATH', '真实路径超出可访问范围', 403);
     if(hidden(path.relative(root,real).split(path.sep).join('/'),mount.excludes,internalPackage))throw new AppError('FORBIDDEN_FILE','真实路径在排除范围内',403);
     const stat = await fs.stat(real);
-    if (!stat.isDirectory() && !(internalPackage && path.basename(real) === 'package.json') && !mime[path.extname(real).toLowerCase()]) throw new AppError('UNSUPPORTED_FILE', '不提供此文件类型', 403);
+    if (!stat.isDirectory() && !stat.isFile()) throw new AppError('UNSUPPORTED_FILE', '仅支持普通文件和目录', 403);
+    if (access === 'preview' && !stat.isDirectory() && !(internalPackage && path.basename(real) === 'package.json') && !mime[path.extname(real).toLowerCase()]) throw new AppError('UNSUPPORTED_FILE', '不提供此文件类型', 403);
     return { real, stat };
   }
 }

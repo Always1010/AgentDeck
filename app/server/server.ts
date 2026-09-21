@@ -8,6 +8,8 @@ import { ZodError } from 'zod';
 import { Registry } from './registry.js';
 import { PathPolicy, inside, relative, mime } from './path-policy.js';
 import { AppError } from './errors.js';
+import { describeFile, isTextFile, legacyIds } from './files.js';
+import { parseFileReference } from '../shared/model.js';
 import { Indexer } from './indexer.js';
 import { WatchManager } from './watch-manager.js';
 import type { ServerResponse } from 'node:http';
@@ -103,13 +105,16 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   });
   main.get<{Querystring:{projectId?:string;kind?:string;q?:string}}>('/api/entries',async req=>index.all().filter(e=>(!req.query.projectId||e.projectId===req.query.projectId)&&(!req.query.kind||e.kind===req.query.kind)&&(!req.query.q||`${e.title} ${e.relativePath} ${registry.data.projects.find(p=>p.id===e.projectId)?.name}`.toLowerCase().includes(req.query.q.toLowerCase()))));
   main.get<{Params:{id:string}}>('/api/entries/:id',async req=>{
-    const e=index.all().find(e=>e.id===req.params.id);if(!e) throw new AppError('ENTRY_MISSING','入口已删除或挂载已停用 / 离线',404);
-    if(e.status==='ready') await policy.resolve(mount(e.mountId),e.relativePath);
+    const ref=parseFileReference(req.params.id);
+    const e=ref ? await describeFile(policy,registry.data,mount(ref.mountId),ref.relativePath) : index.all().find(e=>e.id===req.params.id);if(!e) throw new AppError('ENTRY_MISSING','入口已删除或挂载已停用 / 离线',404);
+    if(e.status==='ready') await policy.resolve(mount(e.mountId),e.relativePath,false,'file');
     return {...e,previewUrl:previewOrigin+previewPath(e.mountId,e.relativePath)};
   });
   main.patch<{Params:{id:string}}>('/api/entries/:id/preferences',async req=>{
     const prefs=preferenceSchema.parse(req.body);
-    if(!index.all().some(e=>e.id===req.params.id)) throw new AppError('ENTRY_MISSING','入口不存在',404);
+    const ref=parseFileReference(req.params.id);
+    if(ref) await describeFile(policy,registry.data,mount(ref.mountId),ref.relativePath);
+    if(!ref && !index.all().some(e=>e.id===req.params.id)) throw new AppError('ENTRY_MISSING','入口不存在',404);
     return changed(d=>{d.entryPreferences[req.params.id]={...d.entryPreferences[req.params.id],...prefs};return {ok:true};},[],()=>{for(const e of index.all())if(e.id===req.params.id)Object.assign(e,prefs);});
   });
   main.put<{Params:{id:string}}>('/api/mounts/:id/tool-override',async req=>{
@@ -120,19 +125,20 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     return changed(d=>{d.toolOverrides=d.toolOverrides.filter(o=>!(o.mountId===value.mountId&&o.toolRoot===value.toolRoot));d.toolOverrides.push(value);return {ok:true};},[value.mountId]);
   });
   main.get<{Params:{id:string};Querystring:{path?:string}}>('/api/mounts/:id/tree',async req=>{
-    const m=mount(req.params.id);const root=req.query.path||'';const dir=await policy.resolve(m,root);const result:TreeItem[]=[];
-    for(const d of await fs.readdir(dir.real,{withFileTypes:true})){ const rel=[root,d.name].filter(Boolean).join('/'); try{const item=await policy.resolve(m,rel);result.push({name:d.name,relativePath:rel,directory:item.stat.isDirectory()});}catch{/* identical boundary for tree and serving */} }
-    return result.sort((a,b)=>Number(b.directory)-Number(a.directory)||a.name.localeCompare(b.name));
+    const m=mount(req.params.id);const root=req.query.path||'';const dir=await policy.resolve(m,root,false,'file');if(!dir.stat.isDirectory())throw new AppError('INVALID_PATH','请选择目录',400);const result:TreeItem[]=[];
+    for(const d of await fs.readdir(dir.real,{withFileTypes:true})){ const rel=[root,d.name].filter(Boolean).join('/'); try{const item=await policy.resolve(m,rel,false,'file');result.push({name:d.name,relativePath:rel,directory:item.stat.isDirectory(),...(!item.stat.isDirectory()?{legacyIds:legacyIds(m,rel,registry.data)}:{})});}catch{/* identical boundary for tree and serving */} }
+    const rank=(name:string)=>/\.(html?|csv|md|markdown)$/i.test(name)?0:1;
+    return result.sort((a,b)=>Number(b.directory)-Number(a.directory)||(!a.directory&&!b.directory?rank(a.name)-rank(b.name):0)||a.name.localeCompare(b.name,'zh-CN',{numeric:true}));
   });
   main.get<{Params:{id:string};Querystring:{path:string}}>('/api/mounts/:id/file',async req=>{
-    const file=await policy.resolve(mount(req.params.id),req.query.path);
+    const file=await policy.resolve(mount(req.params.id),req.query.path,false,'file');
     if(file.stat.isDirectory()) throw new AppError('INVALID_PATH','不能把目录作为文本读取');
     if(file.stat.size>10*1024*1024) throw new AppError('FILE_TOO_LARGE','文本超过 10 MiB，请使用下载入口',413);
-    if(!/\.(html?|css|m?js|json|csv|txt|md|markdown|svg)$/i.test(file.real)) throw new AppError('NOT_TEXT','此文件不是支持的文本类型',415);
+    if(!isTextFile(file.real)) throw new AppError('NOT_TEXT','此文件不是支持的文本类型',415);
     return {text:await fs.readFile(file.real,'utf8'),size:file.stat.size,updatedAt:file.stat.mtimeMs};
   });
   main.get<{Params:{id:string};Querystring:{path:string}}>('/api/mounts/:id/download',async(req,reply)=>{
-    const file=await policy.resolve(mount(req.params.id),req.query.path);
+    const file=await policy.resolve(mount(req.params.id),req.query.path,false,'file');
     if(file.stat.isDirectory()) throw new AppError('INVALID_PATH','不能下载目录');
     return reply.header('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(path.basename(file.real))}`).type('application/octet-stream').send(createReadStream(file.real));
   });
