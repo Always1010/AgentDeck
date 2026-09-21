@@ -16,6 +16,7 @@ a{color:#176b88}header,footer,.row{display:flex;align-items:center;gap:8px;flex-
 aside{grid-column:1;grid-row:2;min-width:0;min-height:0;padding:16px 10px;background:#142e40;color:#e7f1fa;overflow:auto;display:flex;flex-direction:column}
 aside button{display:block;width:100%;text-align:left;margin:3px 0;background:transparent;border-color:transparent;color:inherit;overflow-wrap:anywhere}aside button:hover,aside button.active{background:#294e62}aside button.active{box-shadow:inset 3px 0 #8dc9d5}
 aside nav{margin:18px 0 10px}.nav-label{font-size:11px;letter-spacing:1px;font-weight:600;color:#8fa7b7;margin-top:20px}aside small{font-size:11px;color:#afc4d0}aside .add-project{border-color:#49697a}
+.project-item{display:flex;align-items:center;gap:2px}.project-item>button:first-child{flex:1;min-width:0}.project-item .project-manage{width:auto;flex:none;font-size:11px;padding:6px;border-color:#49697a}
 .connection{font-size:11px;color:#b2d4d1;margin-top:auto;padding:30px 8px 0}.project-picker{display:none}
 .catalog{grid-column:2;grid-row:2;min-width:0;min-height:0;display:flex;flex-direction:column;background:#fff}
 .catalog-header{flex:none;padding:12px 14px 6px;border-bottom:1px solid #e3eaf0}.catalog h2{font-size:15px;margin:2px 0 12px;overflow-wrap:anywhere}.catalog-header header button{font-size:12px;margin-bottom:8px}
