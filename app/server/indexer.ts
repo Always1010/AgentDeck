@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import type { Stats } from 'node:fs';
 import type { Entry, Mount, MountState } from '../shared/model.js';
 import { Registry } from './registry.js';
 import { PathPolicy, hidden, inside } from './path-policy.js';
@@ -11,20 +12,24 @@ export class Indexer {
   entries = new Map<string, Entry[]>();
   states = new Map<string, MountState>();
   private generations = new Map<string, number>();
+  private titleCache = new Map<string,{signature:string;title:string}>();
   constructor(public registry: Registry, public policy: PathPolicy) {}
-  remove(id: string) { this.generations.set(id,(this.generations.get(id)||0)+1); this.entries.delete(id); this.states.delete(id); }
+  remove(id: string) { this.generations.set(id,(this.generations.get(id)||0)+1); this.entries.delete(id); this.states.delete(id);for(const key of this.titleCache.keys())if(key.startsWith(`${id}:`))this.titleCache.delete(key); }
   async scan(mount: Mount) {
     const generation = (this.generations.get(mount.id)||0)+1; this.generations.set(mount.id,generation);
     const result: Entry[] = []; this.states.set(mount.id,{ status: mount.enabled ? 'scanning' : 'disabled' });
-    const add = async (rel: string, toolRoot?: string, status: Entry['status'] = 'ready', candidates?: string[]) => {
+    const add = async (rel: string, toolRoot?: string, status: Entry['status'] = 'ready', candidates?: string[], scannedFile?:{real:string;stat:Stats}) => {
       const format = path.extname(rel).slice(1).toLowerCase();
       const id = entryId(mount.id, toolRoot === undefined ? rel : `tool:${toolRoot}`);
       let title = path.basename(rel) === 'index.html' ? path.posix.basename(toolRoot || path.posix.dirname(rel)) || mount.label : path.posix.basename(rel);
       let updatedAt = 0;
       if (status === 'ready') {
         try {
-          const file = await this.policy.resolve(mount,rel); updatedAt = file.stat.mtimeMs;
-          if (/^html?$/.test(format)) { const handle = await fs.open(file.real,'r'); try { const buf = Buffer.alloc(32768); const {bytesRead} = await handle.read(buf,0,buf.length,0); const raw = buf.subarray(0,bytesRead).toString('utf8').match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1]; if(raw) title=raw.replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim().slice(0,200); } finally { await handle.close(); } }
+          const file = scannedFile || await this.policy.resolve(mount,rel); updatedAt = file.stat.mtimeMs;
+          const signature=`${file.real}:${file.stat.mtimeMs}:${file.stat.ctimeMs}:${file.stat.size}`;const cached=this.titleCache.get(`${mount.id}:${id}`);
+          if(cached?.signature===signature)title=cached.title;
+          else if (/^html?$/.test(format)) { const handle = await fs.open(file.real,'r'); try { const buf = Buffer.alloc(32768); const {bytesRead} = await handle.read(buf,0,buf.length,0); const raw = buf.subarray(0,bytesRead).toString('utf8').match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1]; if(raw) title=raw.replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim().slice(0,200); } finally { await handle.close(); } }
+          this.titleCache.set(`${mount.id}:${id}`,{signature,title});
         } catch { return; }
       } else { title = path.posix.basename(toolRoot || '') || mount.label; }
       const kind: Entry['kind'] = toolRoot !== undefined ? 'tool' : /^html?$/.test(format) ? 'html' : /^(md|markdown)$/.test(format) ? 'markdown' : /^(csv|json)$/.test(format) ? 'data' : 'text';
@@ -52,7 +57,11 @@ export class Indexer {
     };
     const content = async (root: string): Promise<void> => {
       if(mount.toolDirectories.includes(root)) { await library(root); return; }
-      for (const d of await dirs(root)) { const rel=join(root,d.name); if(d.isDirectory()) await content(rel); else if(readable.test(d.name) && !hidden(rel,mount.excludes)) await add(rel); }
+      // The parent was authorized by dirs(); verify each regular file's real path and
+      // lstat here, avoiding re-walking every ancestor for every unchanged title.
+      for (const d of await dirs(root)) { const rel=join(root,d.name); if(d.isDirectory()) await content(rel); else if(readable.test(d.name) && !hidden(rel,mount.excludes)){
+        try{const absolute=path.join(mount.absolutePath,rel);const stat=await fs.lstat(absolute);if(stat.isSymbolicLink()||!stat.isFile())continue;const real=await fs.realpath(absolute);if(!inside(mount.absolutePath,real)||inside(this.policy.stateDir,real))continue;await add(rel,undefined,'ready',undefined,{real,stat});}catch{/* file removed during traversal */}
+      } }
     };
     let state: MountState = {status:mount.enabled?'online':'disabled'};
     if(mount.enabled) try {
@@ -60,7 +69,7 @@ export class Indexer {
       if(mount.mode==='single-tool') { const override=this.registry.data.toolOverrides.find(o=>o.mountId===mount.id&&o.toolRoot===''); const rel=override?.entry || mount.entry; await add(rel,'',await exists(rel)?'ready':'pending-build'); }
       else if(mount.mode==='tool-library') await library(''); else await content('');
     } catch(e) { state={status:'offline',error:(e as Error).message}; }
-    if(this.generations.get(mount.id)===generation) { this.entries.set(mount.id,result); this.states.set(mount.id,state); }
+    if(this.generations.get(mount.id)===generation) { this.entries.set(mount.id,result); this.states.set(mount.id,state);const keys=new Set(result.map(e=>`${mount.id}:${e.id}`));for(const key of this.titleCache.keys())if(key.startsWith(`${mount.id}:`)&&!keys.has(key))this.titleCache.delete(key); }
   }
   all() { return [...this.entries.values()].flat(); }
   async sync() { for(const id of this.entries.keys()) if(!this.registry.data.mounts.some(m=>m.id===id)) this.remove(id); await Promise.all(this.registry.data.mounts.map(m=>this.scan(m))); }
