@@ -5,6 +5,8 @@ import { Management } from './Management.js';
 import { Tree } from './Tree.js';
 import { Viewer, type Signal } from './Viewer.js';
 import { isBoolean, usePreference } from './preferences.js';
+import { ShortcutHelp } from './ShortcutHelp.js';
+import { isEditing, restoreFocus, shortcutFor } from './shortcuts.js';
 import './style.css';
 
 const empty: Snapshot = { projects: [], mounts: [], revision: 0 };
@@ -27,6 +29,13 @@ export function App() {
   const [query, setQuery] = useState('');
   const [favorites, setFavorites] = usePreference<string[]>('favorites', [], (v): v is string[] => Array.isArray(v) && v.every(id => typeof id === 'string'));
   const [immersive, setImmersive] = useState(standalone);
+  const [shortcutsEnabled, setShortcutsEnabled] = usePreference('shortcuts.enabled', true, isBoolean);
+  const [help, setHelp] = useState(false);
+  const [searchActive, setSearchActive] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const immersionRef = useRef<HTMLButtonElement>(null);
+  const searchRestore = useRef<{ query: string; focus: HTMLElement | null } | null>(null);
+  const immersionRestore = useRef<HTMLElement | null>(null);
   const [navCollapsed, setNavCollapsed] = usePreference('layout.navCollapsed', false, isBoolean);
   const [catalogCollapsed, setCatalogCollapsed] = usePreference('layout.catalogCollapsed', false, isBoolean);
   const [catalogWidth, setCatalogWidth] = usePreference('layout.catalogWidth', 290, (v): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 230 && v <= 420);
@@ -66,12 +75,51 @@ export function App() {
     return () => clearTimeout(timer);
   }, [toast]);
 
+  function finishSearch(cancel = true) {
+    if (cancel && searchRestore.current) setQuery(searchRestore.current.query);
+    setSearchActive(false);
+    restoreFocus(cancel ? searchRestore.current?.focus || null : immersionRef.current, immersionRef.current);
+    searchRestore.current = null;
+  }
+  function toggleImmersion() {
+    if (!selected && !immersive) return;
+    if (searchActive) finishSearch();
+    if (!immersive) immersionRestore.current = document.activeElement as HTMLElement | null;
+    setImmersive(!immersive);
+    restoreFocus(immersive ? immersionRestore.current : immersionRef.current, immersionRef.current);
+  }
+  function openEntry(id: string) {
+    setSelected(id);
+    if (searchActive) finishSearch(false);
+  }
+  useEffect(() => {
+    function keydown(event: KeyboardEvent) {
+      if (document.querySelector('[data-workbench-dialog]')) return;
+      const action = shortcutFor(event, isEditing(event.target), shortcutsEnabled);
+      if (action === 'escape') {
+        // Viewer owns the first Escape while its settings panel is open.
+        if (document.querySelector('.viewer-settings')) return;
+        if (searchActive) { event.preventDefault(); finishSearch(); }
+        else if (immersive) { event.preventDefault(); toggleImmersion(); }
+      } else if (action === 'immersive' && !searchActive && (selected || immersive)) {
+        event.preventDefault(); toggleImmersion();
+      } else if (action === 'search') {
+        event.preventDefault();
+        if (!searchActive) searchRestore.current = { query, focus: document.activeElement as HTMLElement | null };
+        setSearchActive(true);
+        requestAnimationFrame(() => { searchRef.current?.focus(); searchRef.current?.select(); });
+      } else if (action === 'help') { event.preventDefault(); setHelp(true); }
+    }
+    document.addEventListener('keydown', keydown);
+    return () => document.removeEventListener('keydown', keydown);
+  }, [shortcutsEnabled, selected, immersive, searchActive, query]);
+
   function favorite() {
     if (selected) setFavorites(favorites.includes(selected) ? favorites.filter(id => id !== selected) : [...favorites, selected]);
   }
   function navigate(mountId: string, relativePath: string) {
     const entry = entries.find(e => e.mountId === mountId && e.relativePath === relativePath);
-    if (entry) setSelected(entry.id);
+    if (entry) openEntry(entry.id);
     else window.open(`/api/mounts/${mountId}/download?path=${encodeURIComponent(relativePath)}`, '_blank', 'noopener');
   }
   function chooseProject(id: string) { setProject(id); setView('all'); setKind(''); }
@@ -84,13 +132,16 @@ export function App() {
   const scope = currentProject?.name || views.find(([id]) => id === view)?.[1];
   const filtered = Boolean(query || kind);
   const offline = mounts.some(m => m.status === 'offline' || m.status === 'disabled');
+  const focusedLayout = immersive && !searchActive;
 
-  return <div className={`shell ${immersive ? 'immersive' : ''} ${navCollapsed ? 'nav-collapsed' : ''} ${catalogCollapsed ? 'catalog-collapsed' : ''}`} style={{ '--catalog-width': `${catalogWidth}px` } as CSSProperties}>
+  return <div className={`shell ${focusedLayout ? 'immersive' : ''} ${navCollapsed ? 'nav-collapsed' : ''} ${catalogCollapsed && !searchActive ? 'catalog-collapsed' : ''}`} style={{ '--catalog-width': `${catalogWidth}px` } as CSSProperties}>
     <header className="workspace-header">
-      <strong className="brand">AgentDeck</strong><span className="workspace-context">{immersive ? '沉浸阅读' : scope}</span>
+      <strong className="brand">AgentDeck</strong><span className="workspace-context">{searchActive ? '搜索内容 · Esc 返回' : immersive ? '沉浸阅读' : scope}</span>
       <div className="workspace-actions">
-        {!immersive && <><button aria-controls="project-navigation" aria-expanded={!navCollapsed} onClick={() => setNavCollapsed(!navCollapsed)}>项目导航</button><button aria-controls="content-catalog" aria-expanded={!catalogCollapsed} onClick={() => setCatalogCollapsed(!catalogCollapsed)}>内容列表</button></>}
-        <button className="immersion-toggle" disabled={!selected && !immersive} aria-pressed={immersive} onClick={() => setImmersive(!immersive)}>{immersive ? '退出沉浸' : '沉浸'}</button>
+        {!focusedLayout && <><button aria-controls="project-navigation" aria-expanded={!navCollapsed} onClick={() => setNavCollapsed(!navCollapsed)}>项目导航</button><button disabled={searchActive} aria-controls="content-catalog" aria-expanded={searchActive || !catalogCollapsed} onClick={() => setCatalogCollapsed(!catalogCollapsed)}>内容列表</button></>}
+        {searchActive && <button onClick={() => finishSearch()}>结束搜索 <kbd>Esc</kbd></button>}
+        <button ref={immersionRef} className="immersion-toggle" disabled={!selected && !immersive} aria-label={immersive ? '退出沉浸' : '沉浸'} aria-keyshortcuts={shortcutsEnabled ? 'f' : undefined} title={shortcutsEnabled ? 'F 切换沉浸；Esc 退出（工作台获得焦点时）' : '切换沉浸'} aria-pressed={immersive} onClick={toggleImmersion}>{immersive ? '退出沉浸' : '沉浸'}{shortcutsEnabled && <kbd>F</kbd>}</button>
+        <button aria-label="快捷键" aria-keyshortcuts={shortcutsEnabled ? '?' : undefined} onClick={() => setHelp(true)}>快捷键{shortcutsEnabled && <kbd>?</kbd>}</button>
       </div>
     </header>
     <aside id="project-navigation">
@@ -103,13 +154,23 @@ export function App() {
     <section className="catalog" id="content-catalog" aria-label="内容列表">
       <div className="catalog-header">
         <header><h2>{scope}</h2>{project && <button aria-label="管理挂载" onClick={() => setManage('edit')}>管理挂载</button>}</header>
-        <div className="catalog-filters"><input aria-label="搜索" type="search" placeholder="搜索项目、名称或路径" value={query} onChange={e => setQuery(e.target.value)} />
+        <div className="catalog-filters"><input ref={searchRef} aria-label="搜索" aria-keyshortcuts={shortcutsEnabled ? '/' : undefined} type="search" placeholder={`搜索项目、名称或路径${shortcutsEnabled ? '  /' : ''}`} value={query} onChange={e => setQuery(e.target.value)} onKeyDown={e => {
+          if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229 || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.repeat) return;
+          if (e.key === 'ArrowDown') { e.preventDefault(); document.querySelector<HTMLButtonElement>('.entry-list .entry')?.focus(); }
+          else if (e.key === 'Enter' && visible[0]) { e.preventDefault(); openEntry(visible[0].id); }
+        }} />
           <select aria-label="类型筛选" value={kind} onChange={e => setKind(e.target.value)}><option value="">全部类型</option><option value="html">HTML 报告 / 页面</option><option value="tool">工具</option><option value="markdown">Markdown</option><option value="other">其他 / 原文</option></select>
           <select aria-label="排序" value={view === 'recent' ? 'recent' : sort} disabled={view === 'recent'} onChange={e => setSort(e.target.value as Sort)}><option value="recent">最近更新优先</option><option value="name">名称排序</option></select></div>
         <div className="list-meta"><span>{visible.length} 个内容</span><button onClick={() => void reload()}>刷新列表</button></div>
       </div>
       <div className="catalog-scroll">
-        <div className="entry-list" aria-label="可读内容">{visible.map(e => <button className={`entry ${selected === e.id ? 'selected' : ''}`} aria-current={selected === e.id ? 'true' : undefined} key={e.id} onClick={() => setSelected(e.id)} title={`${e.title}\n${e.relativePath || e.toolRoot || '根目录'}`}>
+        <div className="entry-list" aria-label="可读内容" onKeyDown={e => {
+          if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229 || !['ArrowUp', 'ArrowDown'].includes(e.key)) return;
+          const rows = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('.entry'));
+          const index = rows.indexOf(document.activeElement as HTMLButtonElement);
+          if (index < 0) return;
+          e.preventDefault(); rows[Math.max(0, Math.min(rows.length - 1, index + (e.key === 'ArrowDown' ? 1 : -1)))]?.focus();
+        }}>{visible.map(e => <button className={`entry ${selected === e.id ? 'selected' : ''}`} aria-current={selected === e.id ? 'true' : undefined} key={e.id} onClick={() => openEntry(e.id)} title={`${e.title}\n${e.relativePath || e.toolRoot || '根目录'}`}>
           <span className="entry-heading"><strong>{e.title}</strong><span className={`badge ${e.kind}`}>{e.kind === 'tool' ? '工具' : e.format.toUpperCase() || 'HTML'}</span></span>
           <small>{data.projects.find(p => p.id === e.projectId)?.name} / {data.mounts.find(m => m.id === e.mountId)?.label}{favorites.includes(e.id) ? ' ★' : ''}</small>
           <small className="entry-path">{e.relativePath || e.toolRoot || '根目录'}</small>
@@ -136,5 +197,6 @@ export function App() {
     {toast && <div className="toast success" role="status">{toast}<button aria-label="关闭提示" onClick={() => setToast('')}>×</button></div>}
     {error && <div className="toast" role="alert">{error}<button aria-label="关闭错误提示" onClick={() => setError('')}>×</button></div>}
     {manage && <Management snapshot={data} project={manage === 'edit' ? currentProject : undefined} close={() => setManage(undefined)} saved={() => void reload()} />}
+    {help && <ShortcutHelp close={() => setHelp(false)} enabled={shortcutsEnabled} setEnabled={setShortcutsEnabled} />}
   </div>;
 }
