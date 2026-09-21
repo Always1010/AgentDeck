@@ -9,6 +9,8 @@ import { Registry } from './registry.js';
 import { PathPolicy, inside, relative, mime } from './path-policy.js';
 import { AppError } from './errors.js';
 import { Indexer } from './indexer.js';
+import { WatchManager } from './watch-manager.js';
+import type { ServerResponse } from 'node:http';
 import { projectInput, mountInput, preferenceSchema, overrideSchema, previewPath, type Mount, type RegistryData, type TreeItem } from '../shared/model.js';
 
 export async function createWorkbench(options: { stateDir: string; port: number; previewPort: number; webDir?: string; dev?: boolean }) {
@@ -19,7 +21,11 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   const previewOrigin = `http://127.0.0.1:${options.previewPort}`;
   const main = Fastify({ logger: false, bodyLimit: 1024 * 1024 });
   const preview = Fastify({ logger: false });
-  let onRegistryChange = async () => { await index.sync(); };
+  const clients=new Set<ServerResponse>();
+  const emit=(type:string,data:unknown)=>{for(const client of clients){if(client.writableLength>1024*1024){client.end();clients.delete(client);}else client.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);}};
+  const watches=new WatchManager(index,emit);
+  await watches.start();
+  let onRegistryChange = async () => { await watches.sync(); };
   const mount = (id: string) => { const m = registry.data.mounts.find(m => m.id === id); if (!m) throw new AppError('MOUNT_NOT_FOUND', '挂载不存在', 404); return m; };
   for (const [app, origin] of [[main, mainOrigin], [preview, previewOrigin]] as const) {
     app.setErrorHandler((err, _req, reply) => {
@@ -32,7 +38,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
       if (req.headers.host !== new URL(origin).host) throw new AppError('INVALID_HOST', 'Host 不受信任，请通过 127.0.0.1 访问', 403);
       reply.header('Cache-Control', 'no-store').header('X-Content-Type-Options', 'nosniff').header('Referrer-Policy', 'no-referrer').header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), usb=(), payment=()');
       if (app === main) {
-        reply.header('Content-Security-Policy', `default-src 'self'; script-src 'self'${options.dev ? " 'unsafe-inline'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' ${previewOrigin} data:; frame-src ${previewOrigin}; connect-src 'self'${options.dev ? ' ws://127.0.0.1:*' : ''}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`);
+        reply.header('Content-Security-Policy', `default-src 'self'; script-src 'self'${options.dev ? " 'unsafe-inline'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' ${previewOrigin} data:; frame-src ${previewOrigin}; connect-src 'self' ${previewOrigin}${options.dev ? ' ws://127.0.0.1:*' : ''}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`);
         if (req.url.startsWith('/api/')) {
           const originHeader = req.headers.origin;
           const site = req.headers['sec-fetch-site'];
@@ -40,6 +46,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
           if (!['GET','HEAD'].includes(req.method) && (originHeader !== mainOrigin || req.headers['x-workbench'] !== '1' || !req.headers['content-type']?.startsWith('application/json'))) throw new AppError('CSRF_REJECTED', '管理变更需要同来源 JSON 请求', 403);
         }
       } else {
+        if(req.headers.origin===mainOrigin) reply.header('Access-Control-Allow-Origin',mainOrigin).header('Vary','Origin');
         reply.header('Content-Security-Policy', `default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; object-src 'none'; base-uri 'self'; frame-ancestors ${mainOrigin}; form-action 'none'; worker-src 'none'; sandbox allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads`);
       }
     });
@@ -55,6 +62,12 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   }
   async function changed<T>(fn: (draft: RegistryData) => T | Promise<T>) { const result = await registry.mutate(fn); await onRegistryChange(); return result; }
   main.get('/api/status', async () => ({ previewOrigin, revision: registry.data.revision, schemaVersion: 1 }));
+  main.get('/api/events',async(req,reply)=>{
+    reply.hijack();reply.raw.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Connection':'keep-alive'});
+    clients.add(reply.raw);reply.raw.write(`retry: 1000\nevent: resync\ndata: ${JSON.stringify({revision:registry.data.revision})}\n\n`);
+    const heartbeat=setInterval(()=>reply.raw.write(': heartbeat\n\n'),15000);
+    req.raw.on('close',()=>{clients.delete(reply.raw);clearInterval(heartbeat);});
+  });
   main.get('/api/projects', async () => ({ projects: [...registry.data.projects].sort((a,b) => a.order-b.order), mounts: registry.data.mounts.map(m=>({...m,...index.states.get(m.id)})), revision: registry.data.revision }));
   main.post('/api/projects', async req => {
     const body = req.body as Record<string, unknown>; const data = projectInput.parse(body);
@@ -123,7 +136,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     if(file.stat.isDirectory()) throw new AppError('INVALID_PATH','不能下载目录');
     return reply.header('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(path.basename(file.real))}`).type('application/octet-stream').send(createReadStream(file.real));
   });
-  main.post<{Params:{id:string}}>('/api/mounts/:id/rescan',async req=>{await index.scan(mount(req.params.id));return {ok:true};});
+  main.post<{Params:{id:string}}>('/api/mounts/:id/rescan',async req=>{await index.scan(mount(req.params.id));emit('resync',{revision:registry.data.revision});return {ok:true};});
   preview.route<{ Params: { id: string; '*': string } }>({ method: ['GET', 'HEAD'], url: '/m/:id/*', handler: async (req, reply) => {
     const m = mount(req.params.id); let rel = req.params['*']; let file = await policy.resolve(m, rel);
     if (file.stat.isDirectory()) {
@@ -152,7 +165,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   return { main, preview, registry, policy, index, mount, changed, mainOrigin, previewOrigin,
     setRegistryHandler(fn: () => Promise<void>) { onRegistryChange = fn; },
     async listen() { try { await preview.listen({ port: options.previewPort, host: '127.0.0.1' }); await main.listen({ port: options.port, host: '127.0.0.1' }); } catch (e) { await preview.close(); await main.close(); throw e; } },
-    async close() { await vite?.close(); await Promise.all([main.close(), preview.close()]); }
+    async close() { await watches.close();for(const c of clients)c.end();clients.clear();await vite?.close(); await Promise.all([main.close(), preview.close()]); }
   };
 }
 export type Workbench = Awaited<ReturnType<typeof createWorkbench>>;
