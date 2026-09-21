@@ -93,6 +93,27 @@ function Build-Project {
     } finally { Pop-Location }
 }
 
+function Save-LegacyReferences {
+    if (!(Test-Port 4310)) { return }
+    $headers = @{ 'Sec-Fetch-Site' = 'same-origin' }
+    $status = Invoke-RestMethod -Uri 'http://127.0.0.1:4310/api/status' -Headers $headers -TimeoutSec 5
+    if ($status.navigation -eq 'files') { return }
+    $entries = Invoke-RestMethod -Uri 'http://127.0.0.1:4310/api/entries' -Headers $headers -TimeoutSec 15
+    $references = [ordered]@{}
+    foreach ($item in $entries) {
+        if ($item.id -match '^[a-fA-F0-9]{32}$' -and $item.mountId -and $item.relativePath) {
+            $references[$item.id] = 'file:' + $item.mountId + ':' + $item.relativePath
+        }
+    }
+    if ($references.Count -eq 0) { return }
+    $stateRoot = Join-Path $dataRoot 'state'
+    $mappingFile = Join-Path $stateRoot 'legacy-file-references.json'
+    New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
+    [IO.File]::WriteAllText(($mappingFile + '.tmp'), ($references | ConvertTo-Json -Depth 3), (New-Object Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath ($mappingFile + '.tmp') -Destination $mappingFile -Force
+    Write-Host ('Preserved ' + $references.Count + ' legacy file references without scanning.')
+}
+
 switch ($Action) {
     'Run' {
         Resolve-Node
@@ -155,7 +176,7 @@ switch ($Action) {
     'Start' { Start-Instance }
     'Stop' { Stop-Instance }
     'Restart' { Stop-Instance; Start-Instance }
-    'Update' { Stop-Instance; Build-Project; Start-Instance }
+    'Update' { Save-LegacyReferences; Stop-Instance; Build-Project; Start-Instance }
     'Uninstall' {
         Stop-Instance
         if (Get-AgentDeckTask) { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false }

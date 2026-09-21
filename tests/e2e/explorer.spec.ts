@@ -29,3 +29,10 @@ test('favorites survive reload without opening directories; old hashes migrate o
  await page.getByRole('button',{name:'收藏',exact:true}).click();await page.getByRole('treeitem',{name:'readme.md',exact:true}).click();await expect(page.locator('.markdown h1')).toHaveText('项目说明');await page.reload();await expect(page.locator('.markdown h1')).toHaveText('项目说明');await expect(page.getByRole('treeitem',{name:'研究资料',exact:true})).toHaveAttribute('aria-expanded','false');
  await fs.rename(path.join(root,'readme.md'),path.join(root,'readme-away.md'));try{await page.getByRole('button',{name:'刷新',exact:true}).click();await expect(page.getByRole('alert')).toContainText('不存在');expect(await page.evaluate(()=>localStorage.getItem('favorites'))).toContain('readme.md');}finally{await fs.rename(path.join(root,'readme-away.md'),path.join(root,'readme.md'));}
 });
+
+test('upgrade snapshot migrates old favorites and links before expanding any directory',async({page})=>{
+ const s=await json(page,'/api/projects');const mount=s.mounts[0];const old=createHash('sha256').update(`${mount.id}\0readme.md`).digest('hex').slice(0,32);const target=`file:${mount.id}:readme.md`;
+ await page.route('**/api/legacy-files',route=>route.fulfill({json:{[old]:target}}));await page.evaluate(id=>localStorage.setItem('favorites',JSON.stringify([id])),old);let treeRequests=0;page.on('request',r=>{if(r.url().includes('/tree'))treeRequests++;});await page.goto('/?entry='+old);
+ await expect(page.locator('.markdown h1')).toHaveText('项目说明');await expect.poll(()=>page.evaluate(()=>localStorage.getItem('favorites'))).toContain(target);expect(treeRequests).toBe(0);
+ await page.getByRole('button',{name:'收藏',exact:true}).click();await fs.rename(path.join(root,'readme.md'),path.join(root,'readme-away.md'));try{await expect(page.locator('.file-row').filter({hasText:'readme.md'})).toContainText('不可用',{timeout:10000});}finally{await fs.rename(path.join(root,'readme-away.md'),path.join(root,'readme.md'));}
+});
