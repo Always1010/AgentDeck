@@ -71,3 +71,13 @@
 - 解决方案：启动失败路径统一清理监听、计时器和开发中间件，然后抛出原错误并以非零状态退出。
 - 验证：正式进程重启、偏好/ID 恢复、离线目录保留及冲突进程退出测试。
 - 相关文件：app/server/server.ts、tests/e2e/restart.spec.ts。
+
+## AD-008 — Windows 大小写可绕过用户排除项
+
+- 日期：2026-09-21
+- 状态：已解决
+- 现象：Windows 实测排除 `private.txt` 后，请求 `PRIVATE.TXT` 仍返回 200。
+- 原因：用户排除路径使用区分大小写字符串比较，与 Windows 文件系统语义不一致。
+- 解决方案：Windows 下以不区分大小写方式匹配排除文件与目录；真实路径解析后再次校验排除项。
+- 验证：大小写别名返回 403，普通请求、源码/下载、junction 和越界回归通过。
+- 相关文件：app/server/path-policy.ts、tests/security.test.ts。
