@@ -34,6 +34,7 @@ export function App() {
   const [searchActive,setSearchActive]=useState(false);
   const searchRef=useRef<HTMLInputElement>(null);
   const immersionRef=useRef<HTMLButtonElement>(null);
+  const sidebarRef=useRef<HTMLButtonElement>(null);
   const searchRestore=useRef<{query:string;focus:HTMLElement|null}|null>(null);
   const immersionRestore=useRef<HTMLElement|null>(null);
   const drag=useRef<{x:number;width:number}|null>(null);
@@ -74,6 +75,7 @@ export function App() {
   function favorite(id:string){const next=favoritesRef.current.includes(id)?favoritesRef.current.filter(x=>x!==id):[...favoritesRef.current,id];favoritesRef.current=next;setFavorites(next);}
   function finishSearch(cancel=true){if(cancel&&searchRestore.current)setQuery(searchRestore.current.query);setSearchActive(false);restoreFocus(cancel?searchRestore.current?.focus||null:immersionRef.current,immersionRef.current);searchRestore.current=null;}
   function open(id:string){setSelected(aliasesRef.current[id]||id);if(searchActive)finishSearch(false);if(matchMedia('(max-width: 640px)').matches)setCollapsed(true);}
+  function toggleSidebar(){const show=!searchActive&&(immersive||collapsed);if(searchActive)finishSearch();if(show&&immersive)setImmersive(false);setCollapsed(!show);restoreFocus(sidebarRef.current);}
   function toggleImmersion(){if(!selected&&!immersive)return;if(searchActive)finishSearch();if(!immersive)immersionRestore.current=document.activeElement as HTMLElement|null;setImmersive(!immersive);restoreFocus(immersive?immersionRestore.current:immersionRef.current,immersionRef.current);}
   useEffect(()=>{const url=new URL(location.href);if(selected)url.searchParams.set('entry',selected);else url.searchParams.delete('entry');history.replaceState(null,'',url);},[selected]);
   useEffect(()=>{function keydown(e:KeyboardEvent){
@@ -83,15 +85,16 @@ export function App() {
       if(document.getElementById('viewer-settings'))return;
       if(searchActive){e.preventDefault();finishSearch();}else if(immersive){e.preventDefault();toggleImmersion();}return;
     }
+    if(action==='sidebar'){e.preventDefault();toggleSidebar();}
     if(action==='immersive'&&selected){e.preventDefault();toggleImmersion();}
     if(action==='help'){e.preventDefault();setHelp(true);}
     if(action==='search'){e.preventDefault();if(!searchActive)searchRestore.current={query,focus:document.activeElement as HTMLElement|null};setSearchActive(true);requestAnimationFrame(()=>searchRef.current?.focus());}
-  }document.addEventListener('keydown',keydown);return()=>document.removeEventListener('keydown',keydown);},[selected,immersive,query,searchActive,shortcutsEnabled]);
+  }document.addEventListener('keydown',keydown);return()=>document.removeEventListener('keydown',keydown);},[selected,immersive,collapsed,query,searchActive,shortcutsEnabled]);
   function resize(value:number){setWidth(Math.max(200,Math.min(440,value)));}
   const hidden=!searchActive&&(immersive||collapsed);
   const refs=(view==='tools'?tools:favorites.map(id=>({id,title:''}))).map(({id,title})=>({id,title,ref:parseFileReference(id)})).filter(({id,title,ref})=>`${title} ${ref?.relativePath||id} ${data.mounts.find(m=>m.id===ref?.mountId)?.label||''}`.toLowerCase().includes(query.trim().toLowerCase()));
   return <div className={`shell ${hidden?'sidebar-hidden':''} ${immersive?'immersive':''}`} style={{'--sidebar-width':`${width}px`} as CSSProperties}>
-    <header className="workspace-header"><button className="sidebar-toggle" aria-label={hidden?'展开文件侧栏':'收起文件侧栏'} aria-expanded={!hidden} onClick={()=>{if(immersive)setImmersive(false);setCollapsed(!hidden);}}>☰</button><strong className="brand">AgentDeck</strong><span className="workspace-context">本地文件工作台</span><div className="workspace-actions">
+    <header className="workspace-header"><button ref={sidebarRef} className="sidebar-toggle" aria-keyshortcuts={shortcutsEnabled?'b':undefined} title={`${hidden?'展开文件侧栏':'收起文件侧栏'}${shortcutsEnabled?' · B（工作台获得焦点时）':''}`} aria-label={hidden?'展开文件侧栏':'收起文件侧栏'} aria-expanded={!hidden} onClick={toggleSidebar}><Icon name="sidebar"/>{shortcutsEnabled&&<kbd aria-hidden="true">B</kbd>}</button><strong className="brand">AgentDeck</strong><span className="workspace-context">本地文件工作台</span><div className="workspace-actions">
       {searchActive&&<button onClick={()=>finishSearch()}>结束筛选</button>}
       <button ref={immersionRef} className="immersion-toggle" disabled={!selected&&!immersive} aria-label={immersive?'退出沉浸':'沉浸'} aria-pressed={immersive} aria-keyshortcuts={shortcutsEnabled?'f':undefined} title={`${immersive?'退出沉浸':'沉浸阅读'}${shortcutsEnabled?' · F（工作台获得焦点时）':''}`} onClick={toggleImmersion}><Icon name={immersive?'collapse':'expand'}/><span>{immersive?'退出沉浸':'沉浸'}</span>{shortcutsEnabled&&<kbd aria-hidden="true">F</kbd>}</button>
       <button aria-label="快捷键" title="快捷键" onClick={()=>setHelp(true)}>?</button>

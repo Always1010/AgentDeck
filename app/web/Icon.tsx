@@ -1,5 +1,6 @@
-export type IconName = 'tool' | 'plus' | 'close' | 'refresh' | 'star' | 'external' | 'more' | 'expand' | 'collapse' | 'save' | 'edit' | 'pause' | 'play' | 'trash' | 'unmount';
+export type IconName = 'sidebar' | 'tool' | 'plus' | 'close' | 'refresh' | 'star' | 'external' | 'more' | 'expand' | 'collapse' | 'save' | 'edit' | 'pause' | 'play' | 'trash' | 'unmount';
 const paths: Record<IconName, string> = {
+  sidebar: 'M3 4h18v16H3V4Zm6 0v16',
   tool: 'M14.7 6.3a5 5 0 0 0-6.4 6.4L3 18l3 3 5.3-5.3a5 5 0 0 0 6.4-6.4L14 13l-3-3 3.7-3.7Z',
   plus: 'M12 5v14M5 12h14',
   close: 'm6 6 12 12M18 6 6 18',
