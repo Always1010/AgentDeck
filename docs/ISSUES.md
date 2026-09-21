@@ -91,3 +91,13 @@
 - 解决方案：共享契约增加不含默认值的独立 PATCH schema，只合并请求明确提交的字段。
 - 验证：重新定位前后工具 ID、入口覆盖、用途和显示名保持；停用/恢复、进程重新初始化和待构建状态测试通过。
 - 相关文件：app/shared/model.ts、app/server/server.ts、tests/discovery.test.ts。
+
+## AD-010 — Markdown 类型标签误用正文样式
+
+- 日期：2026-09-21
+- 状态：已解决
+- 现象：桌面界面截图中，Markdown 内容的类型标签异常放大，挤压标题并增加列表行高。
+- 原因：类型标签直接使用入口类别作为 CSS 类名，`markdown` 与阅读区的 `.markdown` 正文选择器重名，继承了正文内边距与布局规则。
+- 解决方案：类型标签使用 `kind-` 前缀隔离类别样式，正文排版规则保持独立。
+- 验证：Edge 正式模式检查横屏和竖屏中 Markdown 标签高度小于 28px，并检查实际示例报告截图；Markdown 阅读和快捷键回归通过。
+- 相关文件：app/web/App.tsx、app/web/style.css、tests/e2e/workbench.spec.ts。

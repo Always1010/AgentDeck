@@ -19,8 +19,11 @@ test('production: add real projects and run native and built tools',async({page}
   await page.locator('.entry').filter({hasText:'单位换算器'}).click();frame=page.frameLocator('iframe');await frame.locator('#tonnes').fill('3.4');await frame.getByRole('button',{name:'换算',exact:true}).click();await expect(frame.locator('#result')).toHaveText('3400 千克');
   await page.locator('.entry').filter({hasText:'铜市场 · 多文件演示'}).click();frame=page.frameLocator('iframe');await expect(frame.locator('#data')).toContainText('108');await expect(frame.locator('#data')).toContainText('CSV 已读取');await expect(frame.locator('img')).toBeVisible();
   expect((await json(page,'/api/projects')).data.projects).toHaveLength(3);
+  const markdownBadge=page.locator('.entry').filter({hasText:'notes.md'}).locator('.badge');
+  expect(await markdownBadge.evaluate(el=>el.getBoundingClientRect().height)).toBeLessThan(28);
   await page.screenshot({path:'test-results/workbench.png',fullPage:true});
   await page.setViewportSize({width:1080,height:1920});
+  expect(await markdownBadge.evaluate(el=>el.getBoundingClientRect().height)).toBeLessThan(28);
   await expect(frame.locator('#data')).toContainText('CSV 已读取');
   await page.screenshot({path:'test-results/workbench-portrait.png',fullPage:true});
   await page.getByRole('button',{name:'沉浸',exact:true}).click();
