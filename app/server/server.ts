@@ -10,6 +10,7 @@ import { PathPolicy, inside, relative, mime } from './path-policy.js';
 import { AppError } from './errors.js';
 import { describeFile, isTextFile, legacyIds } from './files.js';
 import { parseFileReference } from '../shared/model.js';
+import { readLegacyReferences } from './legacy-references.js';
 import type { ServerResponse } from 'node:http';
 import { projectInput, mountInput, mountPatch, preferenceSchema, overrideSchema, previewPath, type Mount, type RegistryData, type TreeItem } from '../shared/model.js';
 
@@ -23,6 +24,8 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   const clients=new Set<ServerResponse>();
   const emit=(type:string,data:unknown)=>{for(const client of clients){if(client.writableLength>1024*1024){client.end();clients.delete(client);}else client.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);}};
   const aliases = new Map<string, {mountId:string;relativePath:string}>();
+  const legacyReferences = await readLegacyReferences(registry.directory);
+  for (const [id, target] of Object.entries(legacyReferences)) aliases.set(id, parseFileReference(target)!);
   const mount = (id: string) => { const m = registry.data.mounts.find(m => m.id === id); if (!m) throw new AppError('MOUNT_NOT_FOUND', '挂载不存在', 404); return m; };
   for (const [app, origin] of [[main, mainOrigin], [preview, previewOrigin]] as const) {
     app.setErrorHandler((err, _req, reply) => {
@@ -58,7 +61,8 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     if (overlap) throw new AppError('OVERLAPPING_MOUNT', '该目录已包含在项目中；可在已有挂载中标记为工具目录', 409, { mountId: overlap.id, toolDirectory: path.relative(overlap.absolutePath, input.absolutePath).split(path.sep).join('/') });
   }
   async function changed<T>(fn: (draft: RegistryData) => T | Promise<T>) { const result = await registry.mutate(fn); emit('registry-changed',{revision:registry.data.revision}); return result; }
-  main.get('/api/status', async () => ({ previewOrigin, revision: registry.data.revision, schemaVersion: 1 }));
+  main.get('/api/status', async () => ({ previewOrigin, revision: registry.data.revision, schemaVersion: 1, navigation: 'files' }));
+  main.get('/api/legacy-files', async () => legacyReferences);
   main.get('/api/events',async(req,reply)=>{
     reply.hijack();reply.raw.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Connection':'keep-alive'});
     clients.add(reply.raw);reply.raw.write(`retry: 1000\nevent: resync\ndata: ${JSON.stringify({revision:registry.data.revision})}\n\n`);

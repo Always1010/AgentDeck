@@ -39,6 +39,25 @@ export function App() {
     for(const type of ['registry-changed','resync'])events.addEventListener(type,()=>{void reload();setRefresh(v=>v+1);});
     return()=>{events.close();request.current++;};
   },[]);
+  useEffect(()=>{let cancelled=false;
+    void api<Record<string,string>>('/api/legacy-files').then(mapping=>{
+      if(cancelled)return;
+      const valid=Object.fromEntries(Object.entries(mapping).filter(([id,ref])=>/^[a-f0-9]{32}$/i.test(id)&&typeof ref==='string'&&parseFileReference(ref)));
+      const next={...aliasesRef.current,...valid};aliasesRef.current=next;setAliases(next);
+      const migrated=[...new Set(favoritesRef.current.map(id=>next[id]||id))];favoritesRef.current=migrated;setFavorites(migrated);
+      setSelected(id=>next[id]||id);
+    }).catch(()=>{/* Existing local aliases and lazy directory migration remain available. */});
+    return()=>{cancelled=true;};
+  },[]);
+  const [favoriteErrors,setFavoriteErrors]=useState<Record<string,string>>({});
+  useEffect(()=>{if(view!=='favorites')return;let cancelled=false;let checking=false;
+    async function check(){if(checking||document.visibilityState!=='visible')return;checking=true;const next:Record<string,string>={};
+      const ids=favorites.filter(id=>parseFileReference(id));
+      for(let i=0;i<ids.length&&!cancelled;i+=6)await Promise.all(ids.slice(i,i+6).map(async id=>{try{await api(`/api/entries/${encodeURIComponent(id)}`);}catch(e){next[id]=(e as Error).message;}}));
+      if(!cancelled)setFavoriteErrors(next);checking=false;
+    }
+    void check();const timer=setInterval(()=>void check(),4000);return()=>{cancelled=true;clearInterval(timer);};
+  },[view,favorites,data.revision,refresh]);
   function discovered(mount:Mount,items:TreeItem[]){
     const next={...aliasesRef.current};let changed=false;
     for(const item of items)for(const old of item.legacyIds||[]){const id=fileReference(mount.id,item.relativePath);if(next[old]!==id){next[old]=id;changed=true;}}
@@ -90,7 +109,7 @@ export function App() {
         })}{!data.projects.length&&<div className="catalog-empty"><p>挂载目录后，展开文件夹开始浏览。</p><button onClick={()=>setManage('new')}>添加项目</button></div>}</div>
         {view==='favorites'&&<>{refs.map(({id,ref})=>{
           const mount=data.mounts.find(m=>m.id===ref?.mountId);const name=ref?.relativePath.split('/').pop()||'旧收藏（展开原目录后恢复）';
-          return <div className={`file-row ${id===selected?'selected':''}`} key={id}><button className="node-main" role="treeitem" aria-selected={id===selected} title={ref?`${mount?.label||'挂载不可用'} / ${ref.relativePath}`:id} onClick={()=>open(id)}><FileIcon name={name}/><span className="filename">{name}</span>{ref&&(!mount||!mount.enabled)&&<span className="node-status">不可用</span>}</button><button className="row-action starred" aria-label={`取消收藏：${name}`} onClick={()=>favorite(id)}>★</button></div>;
+          return <div className={`file-row ${id===selected?'selected':''}`} key={id}><button className="node-main" role="treeitem" aria-selected={id===selected} title={ref?`${mount?.label||'挂载不可用'} / ${ref.relativePath}${favoriteErrors[id]?' · '+favoriteErrors[id]:''}`:id} onClick={()=>open(id)}><FileIcon name={name}/><span className="filename">{name}</span>{ref&&(!mount||!mount.enabled||favoriteErrors[id])&&<span className="node-status">不可用</span>}</button><button className="row-action starred" aria-label={`取消收藏：${name}`} onClick={()=>favorite(id)}>★</button></div>;
         })}{!refs.length&&<p className="tree-message">{query?'没有匹配的收藏':'点击文件旁的星标，收藏常用文件。'}</p>}</>}
       </div><div className="explorer-footer">{query?'仅筛选已加载的目录和文件':'按需展开 · 原文件只读'}</div>
     </aside>

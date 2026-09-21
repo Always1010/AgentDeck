@@ -77,3 +77,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/windows-background
 ```
 
 实际结果见 [后台验收记录](BACKGROUND-TEST-RESULTS.md)。未实现无人登录的系统服务、跨平台后台安装器、无中断更新、自动回滚和日志限额轮转。
+
+## 文件浏览器版本升级
+
+`background:update` 停止旧后台前，读取它已经存在的入口记录，保存到状态目录的 `legacy-file-references.json`。新版以该映射恢复旧收藏和链接，不遍历挂载磁盘。后续再次更新会识别新版并保留已有映射。若旧实例不可用而没有生成映射，旧收藏仍保留，浏览原目录后按需关联恢复。
