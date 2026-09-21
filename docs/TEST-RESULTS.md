@@ -74,6 +74,7 @@
 - 验证列表宽度、折叠状态、排序记忆；沉浸临时搜索与取消恢复；方向键不切换工具，Enter 才打开；F/Esc 切换、逐层关闭弹窗、嵌套目录选择器、Tab 焦点循环及关闭后焦点恢复；单键禁用记忆；Markdown 滚动位置和独立预览退出。
 - 验证 iframe 中输入 `f/?` 不触发外层快捷键；Ctrl+K/L/J/F、Alt、Meta 和 F11 的合成事件不被工作台取消。IME 使用 isComposing/keyCode 229 合成事件验证；未声称实测所有物理输入法、浏览器扩展或操作系统热键。
 - 测试自身调整：DELETE 请求提供空 JSON 对象；滚动测试页面增高到 5000px，避免大竖屏下文档末尾的浏览器正常滚动限幅影响断言。
+- 截图检查发现并修复 AD-010：Markdown 类型标签与正文样式重名。增加标签高度断言后，工作流与快捷键 9 项回归全部通过。当前截图：[横屏](screenshots/workbench.png)、[竖屏](screenshots/workbench-portrait.png)、[竖屏沉浸](screenshots/workbench-immersive.png)。
 
 ## 未实现（延续 V1 范围）
 

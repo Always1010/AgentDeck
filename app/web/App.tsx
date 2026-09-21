@@ -171,7 +171,7 @@ export function App() {
           if (index < 0) return;
           e.preventDefault(); rows[Math.max(0, Math.min(rows.length - 1, index + (e.key === 'ArrowDown' ? 1 : -1)))]?.focus();
         }}>{visible.map(e => <button className={`entry ${selected === e.id ? 'selected' : ''}`} aria-current={selected === e.id ? 'true' : undefined} key={e.id} onClick={() => openEntry(e.id)} title={`${e.title}\n${e.relativePath || e.toolRoot || '根目录'}`}>
-          <span className="entry-heading"><strong>{e.title}</strong><span className={`badge ${e.kind}`}>{e.kind === 'tool' ? '工具' : e.format.toUpperCase() || 'HTML'}</span></span>
+          <span className="entry-heading"><strong>{e.title}</strong><span className={`badge kind-${e.kind}`}>{e.kind === 'tool' ? '工具' : e.format.toUpperCase() || 'HTML'}</span></span>
           <small>{data.projects.find(p => p.id === e.projectId)?.name} / {data.mounts.find(m => m.id === e.mountId)?.label}{favorites.includes(e.id) ? ' ★' : ''}</small>
           <small className="entry-path">{e.relativePath || e.toolRoot || '根目录'}</small>
           <span className="entry-meta"><time dateTime={new Date(e.updatedAt).toISOString()} title={new Date(e.updatedAt).toLocaleString('zh-CN')}>{dateFormat.format(e.updatedAt)}</time>{e.status !== 'ready' && <span className="entry-status">{labels[e.status]}</span>}</span>

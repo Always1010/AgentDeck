@@ -4,6 +4,8 @@
 
 ![正式模式界面示例](docs/screenshots/workbench.png)
 
+[竖屏界面](docs/screenshots/workbench-portrait.png) · [竖屏沉浸](docs/screenshots/workbench-immersive.png)
+
 ## 启动
 
 需要 Node.js 22.12+（本次实际使用 24.20.0）和 npm。首次安装：
