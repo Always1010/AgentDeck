@@ -1,6 +1,8 @@
 node_modules/
 .npm-cache/
 dist/
+!examples/company/tool/dist/
+!examples/company/tool/dist/**
 .state/
 .test-state/
 test-fixtures-*/
