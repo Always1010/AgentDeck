@@ -6,9 +6,9 @@ export function ShortcutHelp({ close, enabled, setEnabled }: { close: () => void
     <dl className="shortcut-list">
       <div><dt><kbd>F</kbd></dt><dd>进入 / 退出沉浸</dd></div>
       <div><dt><kbd>Esc</kbd></dt><dd>关闭最上层弹窗或更多设置；结束搜索；退出沉浸</dd></div>
-      <div><dt><kbd>/</kbd></dt><dd>搜索当前范围的内容，沉浸时临时展开列表</dd></div>
+      <div><dt><kbd>/</kbd></dt><dd>筛选已加载文件或收藏，沉浸时临时展开侧栏</dd></div>
       <div><dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>在内容列表中移动焦点，不切换当前预览</dd></div>
-      <div><dt><kbd>Enter</kbd></dt><dd>打开聚焦内容；搜索框中打开首个结果</dd></div>
+      <div><dt><kbd>Enter</kbd></dt><dd>打开聚焦文件；左右方向键展开 / 收起文件夹</dd></div>
       <div><dt><kbd>?</kbd></dt><dd>显示快捷键帮助</dd></div>
     </dl>
     <label className="inline"><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />启用单键快捷键（F、/、?）</label>
