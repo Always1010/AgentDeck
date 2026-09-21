@@ -4,6 +4,8 @@ export const kindSchema = z.enum(['html', 'tool', 'markdown', 'text', 'data']);
 export const preferenceSchema = z.object({ title: z.string().max(200).optional(), kind: kindSchema.optional(), refreshMode: z.enum(['auto', 'prompt']).optional() });
 export const projectInput = z.object({ name: z.string().trim().min(1).max(120), order: z.number().int().optional() });
 export const mountInput = z.object({ label: z.string().trim().min(1).max(120), absolutePath: z.string().min(1), mode: modeSchema.default('content'), toolDirectories: z.array(z.string()).default([]), excludes: z.array(z.string()).default([]), entry: z.string().default('index.html'), enabled: z.boolean().default(true) });
+// PATCH must not materialize create-time defaults for omitted settings.
+export const mountPatch = z.object({label:z.string().trim().min(1).max(120).optional(),absolutePath:z.string().min(1).optional(),mode:modeSchema.optional(),toolDirectories:z.array(z.string()).optional(),excludes:z.array(z.string()).optional(),entry:z.string().optional(),enabled:z.boolean().optional()});
 export const projectSchema = projectInput.extend({ id: z.string(), order: z.number().int() });
 export const mountSchema = mountInput.extend({ id: z.string(), projectId: z.string() });
 export const overrideSchema = z.object({ mountId: z.string(), toolRoot: z.string(), entry: z.string() });

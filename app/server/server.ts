@@ -11,7 +11,7 @@ import { AppError } from './errors.js';
 import { Indexer } from './indexer.js';
 import { WatchManager } from './watch-manager.js';
 import type { ServerResponse } from 'node:http';
-import { projectInput, mountInput, preferenceSchema, overrideSchema, previewPath, type Mount, type RegistryData, type TreeItem } from '../shared/model.js';
+import { projectInput, mountInput, mountPatch, preferenceSchema, overrideSchema, previewPath, type Mount, type RegistryData, type TreeItem } from '../shared/model.js';
 
 export async function createWorkbench(options: { stateDir: string; port: number; previewPort: number; webDir?: string; dev?: boolean }) {
   const registry = new Registry(path.resolve(options.stateDir)); await registry.load();
@@ -85,7 +85,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   }));
   main.patch<{ Params: { id: string } }>('/api/mounts/:id', async req => changed(async d => {
     const current = d.mounts.find(m => m.id === req.params.id); if (!current) throw new AppError('MOUNT_NOT_FOUND','挂载不存在',404);
-    const patch = mountInput.partial().parse(req.body); const m = { ...current, ...patch };
+    const patch = mountPatch.parse(req.body); const m = { ...current, ...patch };
     if (m.enabled || patch.absolutePath) await validateMount(m, d);
     Object.assign(current, m); return current;
   }));
