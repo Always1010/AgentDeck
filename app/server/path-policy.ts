@@ -11,7 +11,8 @@ export function relative(value: string, allowEmpty = true) {
   return value.replace(/\/$/, '');
 }
 export function hidden(rel: string, excludes: string[] = [], internalPackage = false) {
-  return rel.split('/').some(s => s.startsWith('.') || /^(node_modules|__pycache__|coverage|credentials|secrets)$/i.test(s) || /(?:\.lock|\.pem|\.key|\.pfx|\.p12|\.tmp|\.bak|~)$/i.test(s) || /^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|id_rsa|id_ed25519)$/i.test(s) || (!internalPackage && s.toLowerCase() === 'package.json')) || excludes.some(x => rel === x || rel.startsWith(`${x}/`));
+  const key=process.platform==='win32'?rel.toLowerCase():rel;
+  return rel.split('/').some(s => s.startsWith('.') || /^(node_modules|__pycache__|coverage|credentials|secrets)$/i.test(s) || /(?:\.lock|\.pem|\.key|\.pfx|\.p12|\.tmp|\.bak|~)$/i.test(s) || /^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|id_rsa|id_ed25519)$/i.test(s) || (!internalPackage && s.toLowerCase() === 'package.json')) || excludes.some(value => {const x=process.platform==='win32'?value.toLowerCase():value;return key === x || key.startsWith(`${x}/`);});
 }
 export class PathPolicy {
   constructor(public stateDir: string) {}
@@ -45,6 +46,7 @@ export class PathPolicy {
     await this.noLinks(target);
     const real = await fs.realpath(target);
     if (!inside(root, real) || inside(this.stateDir, real)) throw new AppError('FORBIDDEN_PATH', '真实路径超出可访问范围', 403);
+    if(hidden(path.relative(root,real).split(path.sep).join('/'),mount.excludes,internalPackage))throw new AppError('FORBIDDEN_FILE','真实路径在排除范围内',403);
     const stat = await fs.stat(real);
     if (!stat.isDirectory() && !(internalPackage && path.basename(real) === 'package.json') && !mime[path.extname(real).toLowerCase()]) throw new AppError('UNSUPPORTED_FILE', '不提供此文件类型', 403);
     return { real, stat };

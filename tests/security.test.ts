@@ -14,6 +14,7 @@ test('traversal, encoded separators, secrets, unknown MIME and exclusions',async
   for(const p of ['../outside.txt','%2e%2e/outside.txt','%2e%2e%2foutside.txt','%5c..%5coutside.txt','C%3a%5cWindows%5cwin.ini','.env.local','secret.key','payload.exe','index.html%3a$DATA'])expect((await get(p)).statusCode).toBeGreaterThanOrEqual(400);
   await app.main.inject({method:'PATCH',url:`/api/mounts/${id}`,headers,payload:{excludes:['private.txt']}});
   expect((await get('private.txt')).statusCode).toBe(403);expect(app.index.all().some(e=>e.relativePath==='private.txt')).toBe(false);
+  if(process.platform==='win32')expect((await get('PRIVATE.TXT')).statusCode).toBe(403);
   expect((await app.main.inject({url:`/api/mounts/${id}/download?path=..%2Foutside.txt`,headers})).statusCode).toBe(400);
 });
 test('Windows junction and case boundaries, sensitive roots and state ancestry',async()=>{
