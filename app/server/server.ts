@@ -25,7 +25,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   const emit=(type:string,data:unknown)=>{for(const client of clients){if(client.writableLength>1024*1024){client.end();clients.delete(client);}else client.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);}};
   const watches=new WatchManager(index,emit);
   await watches.start();
-  let onRegistryChange = async () => { await watches.sync(); };
+  let onRegistryChange = async (force: string[] = []) => { watches.sync(force); };
   const mount = (id: string) => { const m = registry.data.mounts.find(m => m.id === id); if (!m) throw new AppError('MOUNT_NOT_FOUND', '挂载不存在', 404); return m; };
   for (const [app, origin] of [[main, mainOrigin], [preview, previewOrigin]] as const) {
     app.setErrorHandler((err, _req, reply) => {
@@ -60,7 +60,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     const overlap = draft.mounts.find(m => m.projectId === input.projectId && m.id !== input.id && (inside(m.absolutePath, input.absolutePath) || inside(input.absolutePath, m.absolutePath)));
     if (overlap) throw new AppError('OVERLAPPING_MOUNT', '该目录已包含在项目中；可在已有挂载中标记为工具目录', 409, { mountId: overlap.id, toolDirectory: path.relative(overlap.absolutePath, input.absolutePath).split(path.sep).join('/') });
   }
-  async function changed<T>(fn: (draft: RegistryData) => T | Promise<T>) { const result = await registry.mutate(fn); await onRegistryChange(); return result; }
+  async function changed<T>(fn: (draft: RegistryData) => T | Promise<T>, force: string[] = [], after?: () => void) { const result = await registry.mutate(fn); after?.(); await onRegistryChange(force); return result; }
   main.get('/api/status', async () => ({ previewOrigin, revision: registry.data.revision, schemaVersion: 1 }));
   main.get('/api/events',async(req,reply)=>{
     reply.hijack();reply.raw.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Connection':'keep-alive'});
@@ -110,14 +110,14 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   main.patch<{Params:{id:string}}>('/api/entries/:id/preferences',async req=>{
     const prefs=preferenceSchema.parse(req.body);
     if(!index.all().some(e=>e.id===req.params.id)) throw new AppError('ENTRY_MISSING','入口不存在',404);
-    return changed(d=>{d.entryPreferences[req.params.id]={...d.entryPreferences[req.params.id],...prefs};return {ok:true};});
+    return changed(d=>{d.entryPreferences[req.params.id]={...d.entryPreferences[req.params.id],...prefs};return {ok:true};},[],()=>{for(const e of index.all())if(e.id===req.params.id)Object.assign(e,prefs);});
   });
   main.put<{Params:{id:string}}>('/api/mounts/:id/tool-override',async req=>{
     const value=overrideSchema.parse({...req.body as object,mountId:req.params.id}); const m=mount(value.mountId);
     relative(value.toolRoot);relative(value.entry,false);
     if(!/\.html?$/i.test(value.entry)) throw new AppError('INVALID_ENTRY','请选择 HTML 入口');
     await policy.resolve(m,[value.toolRoot,value.entry].filter(Boolean).join('/'));
-    return changed(d=>{d.toolOverrides=d.toolOverrides.filter(o=>!(o.mountId===value.mountId&&o.toolRoot===value.toolRoot));d.toolOverrides.push(value);return {ok:true};});
+    return changed(d=>{d.toolOverrides=d.toolOverrides.filter(o=>!(o.mountId===value.mountId&&o.toolRoot===value.toolRoot));d.toolOverrides.push(value);return {ok:true};},[value.mountId]);
   });
   main.get<{Params:{id:string};Querystring:{path?:string}}>('/api/mounts/:id/tree',async req=>{
     const m=mount(req.params.id);const root=req.query.path||'';const dir=await policy.resolve(m,root);const result:TreeItem[]=[];
@@ -164,7 +164,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     });
   }
   return { main, preview, registry, policy, index, mount, changed, mainOrigin, previewOrigin,
-    setRegistryHandler(fn: () => Promise<void>) { onRegistryChange = fn; },
+    setRegistryHandler(fn: (force?: string[]) => Promise<void>) { onRegistryChange = fn; },
     async listen() { try { await preview.listen({ port: options.previewPort, host: '127.0.0.1' }); await main.listen({ port: options.port, host: '127.0.0.1' }); } catch (e) { await watches.close();await vite?.close();await preview.close(); await main.close(); throw e; } },
     async close() { await watches.close();for(const c of clients)c.end();clients.clear();await vite?.close(); await Promise.all([main.close(), preview.close()]); }
   };

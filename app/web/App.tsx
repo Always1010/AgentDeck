@@ -132,6 +132,7 @@ export function App() {
   const scope = currentProject?.name || views.find(([id]) => id === view)?.[1];
   const filtered = Boolean(query || kind);
   const offline = mounts.some(m => m.status === 'offline' || m.status === 'disabled');
+  const scanning = mounts.some(m => m.status === 'scanning');
   const focusedLayout = immersive && !searchActive;
 
   return <div className={`shell ${focusedLayout ? 'immersive' : ''} ${navCollapsed ? 'nav-collapsed' : ''} ${catalogCollapsed && !searchActive ? 'catalog-collapsed' : ''}`} style={{ '--catalog-width': `${catalogWidth}px` } as CSSProperties}>
@@ -177,8 +178,8 @@ export function App() {
           <span className="entry-meta"><time dateTime={new Date(e.updatedAt).toISOString()} title={new Date(e.updatedAt).toLocaleString('zh-CN')}>{dateFormat.format(e.updatedAt)}</time>{e.status !== 'ready' && <span className="entry-status">{labels[e.status]}</span>}</span>
         </button>)}</div>
         {!visible.length && <div className="catalog-empty">
-          <strong>{!data.projects.length ? '还没有项目' : filtered ? '没有匹配的内容' : view === 'favorites' ? '还没有收藏' : offline ? '目录暂不可用' : '暂无可读内容'}</strong>
-          <p>{!data.projects.length ? '添加项目，原文件保留在原位置。' : filtered ? '试试其他关键词，或清除搜索与类型筛选。' : view === 'favorites' ? '打开内容后，点击工具栏中的收藏。' : offline ? '展开下方目录状态，或在管理挂载中重新定位。' : '可展开目录检查文件；工具需有静态 HTML 入口。'}</p>
+          <strong>{!data.projects.length ? '还没有项目' : filtered ? '没有匹配的内容' : view === 'favorites' ? '还没有收藏' : scanning ? '正在扫描目录' : offline ? '目录暂不可用' : '暂无可读内容'}</strong>
+          <p>{!data.projects.length ? '添加项目，原文件保留在原位置。' : filtered ? '试试其他关键词，或清除搜索与类型筛选。' : view === 'favorites' ? '打开内容后，点击工具栏中的收藏。' : scanning ? '项目已保存，可以继续使用工作台；内容将在后台扫描完成后出现。' : offline ? '展开下方目录状态，或在管理挂载中重新定位。' : '可展开目录检查文件；工具需有静态 HTML 入口。'}</p>
           {filtered && <button onClick={() => { setQuery(''); setKind(''); }}>清除筛选</button>}
           {!data.projects.length && <button onClick={() => setManage('new')}>添加项目</button>}
         </div>}

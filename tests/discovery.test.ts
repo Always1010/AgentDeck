@@ -1,4 +1,4 @@
-import { test, expect } from 'vitest';
+import { test, expect, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -12,11 +12,11 @@ test('tool container rules, candidate selection, stable IDs and restart persiste
   const headers={host:'127.0.0.1:4310','sec-fetch-site':'same-origin',origin:'http://127.0.0.1:4310','x-workbench':'1','content-type':'application/json'};
   try{
     await app.main.inject({method:'POST',url:'/api/projects',headers,payload:{name:'工具',mount:{label:'库',absolutePath:root,mode:'tool-library'}}});
-    const all=app.index.all();expect(all).toHaveLength(4);const conflict=all.find(e=>e.toolRoot==='group/app')!;expect(conflict.status).toBe('choose-entry');expect(all.find(e=>e.toolRoot==='source-only')?.status).toBe('pending-build');
-    const r=await app.main.inject({method:'PUT',url:`/api/mounts/${conflict.mountId}/tool-override`,headers,payload:{toolRoot:'group/app',entry:'dist/index.html'}});expect(r.statusCode).toBe(200);expect(app.index.all().find(e=>e.id===conflict.id)?.relativePath).toBe('group/app/dist/index.html');
+    await vi.waitFor(()=>expect(app.index.all()).toHaveLength(4));const all=app.index.all();const conflict=all.find(e=>e.toolRoot==='group/app')!;expect(conflict.status).toBe('choose-entry');expect(all.find(e=>e.toolRoot==='source-only')?.status).toBe('pending-build');
+    const r=await app.main.inject({method:'PUT',url:`/api/mounts/${conflict.mountId}/tool-override`,headers,payload:{toolRoot:'group/app',entry:'dist/index.html'}});expect(r.statusCode).toBe(200);await vi.waitFor(()=>expect(app.index.all().find(e=>e.id===conflict.id)?.relativePath).toBe('group/app/dist/index.html'));
     await app.main.inject({method:'PATCH',url:`/api/entries/${conflict.id}/preferences`,headers,payload:{title:'自定义工具'}});await app.close();app=await createWorkbench(options);expect(app.index.all().find(e=>e.id===conflict.id)?.title).toBe('自定义工具');
-    const newRoot=path.join(temp,'relocated');await fs.cp(root,newRoot,{recursive:true});const relocated=await app.main.inject({method:'PATCH',url:`/api/mounts/${conflict.mountId}`,headers,payload:{absolutePath:newRoot}});expect(relocated.statusCode,relocated.body).toBe(200);expect(app.index.all().find(e=>e.id===conflict.id)?.relativePath,JSON.stringify([...app.index.states])).toBe('group/app/dist/index.html');
-    expect(app.registry.data.mounts[0].mode).toBe('tool-library');await app.main.inject({method:'PATCH',url:`/api/mounts/${conflict.mountId}`,headers,payload:{enabled:false}});await app.main.inject({method:'PATCH',url:`/api/mounts/${conflict.mountId}`,headers,payload:{enabled:true}});expect(app.registry.data.mounts[0].mode).toBe('tool-library');expect(app.index.all().find(e=>e.id===conflict.id)?.title).toBe('自定义工具');
+    const newRoot=path.join(temp,'relocated');await fs.cp(root,newRoot,{recursive:true});const relocated=await app.main.inject({method:'PATCH',url:`/api/mounts/${conflict.mountId}`,headers,payload:{absolutePath:newRoot}});expect(relocated.statusCode,relocated.body).toBe(200);await vi.waitFor(()=>expect(app.index.all().find(e=>e.id===conflict.id)?.relativePath).toBe('group/app/dist/index.html'));
+    expect(app.registry.data.mounts[0].mode).toBe('tool-library');await app.main.inject({method:'PATCH',url:`/api/mounts/${conflict.mountId}`,headers,payload:{enabled:false}});await app.main.inject({method:'PATCH',url:`/api/mounts/${conflict.mountId}`,headers,payload:{enabled:true}});expect(app.registry.data.mounts[0].mode).toBe('tool-library');await vi.waitFor(()=>expect(app.index.all().find(e=>e.id===conflict.id)?.title).toBe('自定义工具'));
     await fs.rm(path.join(newRoot,'group/app/dist'),{recursive:true});await app.index.sync();expect(app.index.all().find(e=>e.id===conflict.id)?.status).toBe('pending-build');
   }finally{await app.close();await fs.rm(temp,{recursive:true,force:true});}
 });
