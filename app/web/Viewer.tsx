@@ -25,7 +25,7 @@ export function Viewer({id,favorite,toggleFavorite,back,navigate}:{id:string;fav
     const timer=setInterval(async()=>{
       if(checking||document.visibilityState!=='visible'||!live.current)return;checking=true;
       try{const current=live.current;const e=await api<Entry>(endpoint);if(disposed||current!==live.current)return;
-        if(e.updatedAt!==current.updatedAt){if(current.refreshMode==='auto'&&!/^html?$/.test(current.format))void load();else setPending('文件已更新，点击加载更新。当前页面保持不变。');}
+        if(e.fileVersion!==current.fileVersion){if(current.refreshMode==='auto'&&!/^html?$/.test(current.format))void load();else setPending('文件已更新，点击加载更新。当前页面保持不变。');}
       }catch(e){if(!disposed)setPending((e as Error).message);}finally{checking=false;}
     },4000);
     return()=>{disposed=true;clearInterval(timer);};

@@ -10,24 +10,19 @@ import { PathPolicy, inside, relative, mime } from './path-policy.js';
 import { AppError } from './errors.js';
 import { describeFile, isTextFile, legacyIds } from './files.js';
 import { parseFileReference } from '../shared/model.js';
-import { Indexer } from './indexer.js';
-import { WatchManager } from './watch-manager.js';
 import type { ServerResponse } from 'node:http';
 import { projectInput, mountInput, mountPatch, preferenceSchema, overrideSchema, previewPath, type Mount, type RegistryData, type TreeItem } from '../shared/model.js';
 
 export async function createWorkbench(options: { stateDir: string; port: number; previewPort: number; webDir?: string; dev?: boolean }) {
   const registry = new Registry(path.resolve(options.stateDir)); await registry.load();
   const policy = new PathPolicy(registry.directory);
-  const index = new Indexer(registry,policy); await index.sync();
   const mainOrigin = `http://127.0.0.1:${options.port}`;
   const previewOrigin = `http://127.0.0.1:${options.previewPort}`;
   const main = Fastify({ logger: false, bodyLimit: 1024 * 1024 });
   const preview = Fastify({ logger: false });
   const clients=new Set<ServerResponse>();
   const emit=(type:string,data:unknown)=>{for(const client of clients){if(client.writableLength>1024*1024){client.end();clients.delete(client);}else client.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);}};
-  const watches=new WatchManager(index,emit);
-  await watches.start();
-  let onRegistryChange = async (force: string[] = []) => { watches.sync(force); };
+  const aliases = new Map<string, {mountId:string;relativePath:string}>();
   const mount = (id: string) => { const m = registry.data.mounts.find(m => m.id === id); if (!m) throw new AppError('MOUNT_NOT_FOUND', '挂载不存在', 404); return m; };
   for (const [app, origin] of [[main, mainOrigin], [preview, previewOrigin]] as const) {
     app.setErrorHandler((err, _req, reply) => {
@@ -62,7 +57,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     const overlap = draft.mounts.find(m => m.projectId === input.projectId && m.id !== input.id && (inside(m.absolutePath, input.absolutePath) || inside(input.absolutePath, m.absolutePath)));
     if (overlap) throw new AppError('OVERLAPPING_MOUNT', '该目录已包含在项目中；可在已有挂载中标记为工具目录', 409, { mountId: overlap.id, toolDirectory: path.relative(overlap.absolutePath, input.absolutePath).split(path.sep).join('/') });
   }
-  async function changed<T>(fn: (draft: RegistryData) => T | Promise<T>, force: string[] = [], after?: () => void) { const result = await registry.mutate(fn); after?.(); await onRegistryChange(force); return result; }
+  async function changed<T>(fn: (draft: RegistryData) => T | Promise<T>) { const result = await registry.mutate(fn); emit('registry-changed',{revision:registry.data.revision}); return result; }
   main.get('/api/status', async () => ({ previewOrigin, revision: registry.data.revision, schemaVersion: 1 }));
   main.get('/api/events',async(req,reply)=>{
     reply.hijack();reply.raw.writeHead(200,{'Content-Type':'text/event-stream','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Connection':'keep-alive'});
@@ -70,7 +65,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     const heartbeat=setInterval(()=>reply.raw.write(': heartbeat\n\n'),15000);
     req.raw.on('close',()=>{clients.delete(reply.raw);clearInterval(heartbeat);});
   });
-  main.get('/api/projects', async () => ({ projects: [...registry.data.projects].sort((a,b) => a.order-b.order), mounts: registry.data.mounts.map(m=>({...m,...index.states.get(m.id)})), revision: registry.data.revision }));
+  main.get('/api/projects', async () => ({ projects: [...registry.data.projects].sort((a,b) => a.order-b.order), mounts: await Promise.all(registry.data.mounts.map(async m=>{if(!m.enabled)return {...m,status:'disabled'};try{await policy.root(m.absolutePath);return {...m,status:'online'};}catch(e){return {...m,status:'offline',error:(e as Error).message};}})), revision: registry.data.revision }));
   main.post('/api/projects', async req => {
     const body = req.body as Record<string, unknown>; const data = projectInput.parse(body);
     return changed(async d => {
@@ -103,30 +98,27 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     const current = await fs.realpath(value); const dirs = await fs.readdir(current, { withFileTypes: true });
     return { current, parent: path.dirname(current), directories: dirs.filter(d => d.isDirectory() && !d.isSymbolicLink() && !d.name.startsWith('.')).map(d => ({ name: d.name, path: path.join(current,d.name) })) };
   });
-  main.get<{Querystring:{projectId?:string;kind?:string;q?:string}}>('/api/entries',async req=>index.all().filter(e=>(!req.query.projectId||e.projectId===req.query.projectId)&&(!req.query.kind||e.kind===req.query.kind)&&(!req.query.q||`${e.title} ${e.relativePath} ${registry.data.projects.find(p=>p.id===e.projectId)?.name}`.toLowerCase().includes(req.query.q.toLowerCase()))));
-  main.get<{Params:{id:string}}>('/api/entries/:id',async req=>{
-    const ref=parseFileReference(req.params.id);
-    const e=ref ? await describeFile(policy,registry.data,mount(ref.mountId),ref.relativePath) : index.all().find(e=>e.id===req.params.id);if(!e) throw new AppError('ENTRY_MISSING','入口已删除或挂载已停用 / 离线',404);
-    if(e.status==='ready') await policy.resolve(mount(e.mountId),e.relativePath,false,'file');
+  async function entry(id:string) {
+    const ref=parseFileReference(id)||aliases.get(id);
+    if(!ref)throw new AppError('ENTRY_MISSING','旧链接尚未关联文件，请展开原目录后重试',404);
+    const e=await describeFile(policy,registry.data,mount(ref.mountId),ref.relativePath);
     return {...e,previewUrl:previewOrigin+previewPath(e.mountId,e.relativePath)};
-  });
+  }
+  main.get<{Params:{id:string}}>('/api/entries/:id',async req=>entry(req.params.id));
   main.patch<{Params:{id:string}}>('/api/entries/:id/preferences',async req=>{
-    const prefs=preferenceSchema.parse(req.body);
-    const ref=parseFileReference(req.params.id);
-    if(ref) await describeFile(policy,registry.data,mount(ref.mountId),ref.relativePath);
-    if(!ref && !index.all().some(e=>e.id===req.params.id)) throw new AppError('ENTRY_MISSING','入口不存在',404);
-    return changed(d=>{d.entryPreferences[req.params.id]={...d.entryPreferences[req.params.id],...prefs};return {ok:true};},[],()=>{for(const e of index.all())if(e.id===req.params.id)Object.assign(e,prefs);});
+    const prefs=preferenceSchema.parse(req.body);const e=await entry(req.params.id);
+    return changed(d=>{d.entryPreferences[e.id]={...d.entryPreferences[e.id],...prefs};return {ok:true};});
   });
   main.put<{Params:{id:string}}>('/api/mounts/:id/tool-override',async req=>{
     const value=overrideSchema.parse({...req.body as object,mountId:req.params.id}); const m=mount(value.mountId);
     relative(value.toolRoot);relative(value.entry,false);
     if(!/\.html?$/i.test(value.entry)) throw new AppError('INVALID_ENTRY','请选择 HTML 入口');
     await policy.resolve(m,[value.toolRoot,value.entry].filter(Boolean).join('/'));
-    return changed(d=>{d.toolOverrides=d.toolOverrides.filter(o=>!(o.mountId===value.mountId&&o.toolRoot===value.toolRoot));d.toolOverrides.push(value);return {ok:true};},[value.mountId]);
+    return changed(d=>{d.toolOverrides=d.toolOverrides.filter(o=>!(o.mountId===value.mountId&&o.toolRoot===value.toolRoot));d.toolOverrides.push(value);return {ok:true};});
   });
   main.get<{Params:{id:string};Querystring:{path?:string}}>('/api/mounts/:id/tree',async req=>{
     const m=mount(req.params.id);const root=req.query.path||'';const dir=await policy.resolve(m,root,false,'file');if(!dir.stat.isDirectory())throw new AppError('INVALID_PATH','请选择目录',400);const result:TreeItem[]=[];
-    for(const d of await fs.readdir(dir.real,{withFileTypes:true})){ const rel=[root,d.name].filter(Boolean).join('/'); try{const item=await policy.resolve(m,rel,false,'file');result.push({name:d.name,relativePath:rel,directory:item.stat.isDirectory(),...(!item.stat.isDirectory()?{legacyIds:legacyIds(m,rel,registry.data)}:{})});}catch{/* identical boundary for tree and serving */} }
+    for(const d of await fs.readdir(dir.real,{withFileTypes:true})){ const rel=[root,d.name].filter(Boolean).join('/'); try{const item=await policy.resolve(m,rel,false,'file');const oldIds=item.stat.isDirectory()?[]:legacyIds(m,rel,registry.data);for(const id of oldIds)aliases.set(id,{mountId:m.id,relativePath:rel});result.push({name:d.name,relativePath:rel,directory:item.stat.isDirectory(),...(!item.stat.isDirectory()?{legacyIds:oldIds}:{})});}catch{/* identical boundary for tree and serving */} }
     const rank=(name:string)=>/\.(html?|csv|md|markdown)$/i.test(name)?0:1;
     return result.sort((a,b)=>Number(b.directory)-Number(a.directory)||(!a.directory&&!b.directory?rank(a.name)-rank(b.name):0)||a.name.localeCompare(b.name,'zh-CN',{numeric:true}));
   });
@@ -142,7 +134,6 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     if(file.stat.isDirectory()) throw new AppError('INVALID_PATH','不能下载目录');
     return reply.header('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(path.basename(file.real))}`).type('application/octet-stream').send(createReadStream(file.real));
   });
-  main.post<{Params:{id:string}}>('/api/mounts/:id/rescan',async req=>{await index.scan(mount(req.params.id));emit('resync',{revision:registry.data.revision});return {ok:true};});
   preview.route<{ Params: { id: string; '*': string } }>({ method: ['GET', 'HEAD'], url: '/m/:id/*', handler: async (req, reply) => {
     const m = mount(req.params.id); let rel = req.params['*']; let file = await policy.resolve(m, rel);
     if (file.stat.isDirectory()) {
@@ -169,10 +160,9 @@ export async function createWorkbench(options: { stateDir: string; port: number;
       return reply.type(mime[path.extname(candidate)] || 'application/octet-stream').send(createReadStream(candidate));
     });
   }
-  return { main, preview, registry, policy, index, mount, changed, mainOrigin, previewOrigin,
-    setRegistryHandler(fn: (force?: string[]) => Promise<void>) { onRegistryChange = fn; },
-    async listen() { try { await preview.listen({ port: options.previewPort, host: '127.0.0.1' }); await main.listen({ port: options.port, host: '127.0.0.1' }); } catch (e) { await watches.close();await vite?.close();await preview.close(); await main.close(); throw e; } },
-    async close() { await watches.close();for(const c of clients)c.end();clients.clear();await vite?.close(); await Promise.all([main.close(), preview.close()]); }
+  return { main, preview, registry, policy, mount, changed, mainOrigin, previewOrigin,
+    async listen() { try { await preview.listen({ port: options.previewPort, host: '127.0.0.1' }); await main.listen({ port: options.port, host: '127.0.0.1' }); } catch (e) { await vite?.close();await preview.close(); await main.close(); throw e; } },
+    async close() { for(const c of clients)c.end();clients.clear();await vite?.close(); await Promise.all([main.close(), preview.close()]); }
   };
 }
 export type Workbench = Awaited<ReturnType<typeof createWorkbench>>;

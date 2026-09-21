@@ -121,3 +121,13 @@
 - 解决方案：合并为左侧按需文件树与右侧预览；目录单击展开并读取直接子项；所有文件行保持 28px、13px 字号，详情移入提示或更多菜单；窄窗口从左侧展开抽屉，横竖屏与沉浸切换保留同一预览实例。
 - 验证：类型检查；Edge 浏览器测试覆盖单击展开、未展开目录不发起请求、加载范围筛选、代码/Markdown 预览、1920×1080 / 1080×1920 / 900×1440 布局、500px 抽屉、输入与滚动保持、收藏刷新与旧 ID 迁移。
 - 相关文件：app/web/App.tsx、app/web/Tree.tsx、app/web/Viewer.tsx、app/web/style.css、app/web/Management.tsx、app/web/ShortcutHelp.tsx、tests/e2e/explorer.spec.ts。
+
+## AD-013 — 递归索引将模板 HTML 汇总为内容并在文件变化时重扫
+
+- 日期：2026-09-21
+- 状态：已解决
+- 现象：项目中的模板、子页面被递归汇总到内容入口，模板占位标题暴露在主列表中，难以辨识真实文件结构；文件变化触发整个挂载的重新索引。
+- 原因：内容发现默认递归目录、提取 HTML title，全量入口列表依赖索引；Chokidar 监听整个根目录并在变化后重扫。
+- 解决方案：删除递归 Indexer、WatchManager 与扫描接口；目录单层按需读取，打开文件直接解析路径；已展开目录局部刷新，当前文件独立检查版本；HTML 保留手动更新提示，文本按偏好刷新。
+- 验证：单元测试验证挂载、改名、重启不调用 readdir，展开根只读取一次且不打开模板内容；文件访问、旧偏好、停用/恢复、安全边界与浏览器千文件场景回归。
+- 相关文件：app/server/server.ts、app/server/files.ts、app/shared/model.ts、app/web/App.tsx、app/web/Viewer.tsx、tests/background-scan.test.ts、tests/discovery.test.ts、tests/e2e/performance.spec.ts、README.md。

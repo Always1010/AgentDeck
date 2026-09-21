@@ -23,7 +23,6 @@
     "background:uninstall": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/agentdeck.ps1 -Action Uninstall"
   },
   "dependencies": {
-    "chokidar": "^4.0.3",
     "fastify": "^5.6.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

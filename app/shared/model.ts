@@ -13,8 +13,8 @@ export const registrySchema = z.object({ schemaVersion: z.literal(1), revision: 
 export type Project = z.infer<typeof projectSchema>;
 export type Mount = z.infer<typeof mountSchema>;
 export type RegistryData = z.infer<typeof registrySchema>;
-export type Entry = { id: string; projectId: string; mountId: string; title: string; kind: z.infer<typeof kindSchema>; format: string; relativePath: string; toolRoot?: string; resourceRoot: string; updatedAt: number; refreshMode: 'auto' | 'prompt'; status: 'ready' | 'pending-build' | 'choose-entry'; error?: string; candidates?: string[]; previewUrl?: string };
-export type MountState = { status: 'scanning' | 'online' | 'offline' | 'disabled'; error?: string };
+export type Entry = { id: string; projectId: string; mountId: string; title: string; kind: z.infer<typeof kindSchema>; format: string; relativePath: string; toolRoot?: string; resourceRoot: string; updatedAt: number; refreshMode: 'auto' | 'prompt'; status: 'ready' | 'pending-build' | 'choose-entry'; error?: string; candidates?: string[]; previewUrl?: string; fileVersion?: string };
+export type MountState = { status: 'online' | 'offline' | 'disabled'; error?: string };
 export type Snapshot = { projects: Project[]; mounts: (Mount & MountState)[]; revision: number };
 export type TreeItem = { name: string; relativePath: string; directory: boolean; legacyIds?: string[] };
 /** Reversible references allow opening files without an index. */

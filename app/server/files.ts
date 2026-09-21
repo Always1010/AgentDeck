@@ -33,5 +33,5 @@ export async function describeFile(policy: PathPolicy, registry: RegistryData, m
   return { id, mountId: m.id, projectId: m.projectId, relativePath: rel, title: path.posix.basename(rel), format,
     kind: /^html?$/.test(format) ? 'html' : /^(md|markdown)$/.test(format) ? 'markdown' : /^(csv|json)$/.test(format) ? 'data' : 'text',
     resourceRoot: path.posix.dirname(rel) === '.' ? '' : path.posix.dirname(rel), updatedAt: file.stat.mtimeMs,
-    status: 'ready', refreshMode: 'prompt', ...prefs };
+    status: 'ready', refreshMode: 'prompt', fileVersion: `${file.stat.mtimeMs}:${file.stat.ctimeMs}:${file.stat.size}`, ...prefs };
 }
