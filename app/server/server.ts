@@ -4,13 +4,14 @@ import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { ZodError } from 'zod';
+import { z, ZodError } from 'zod';
 import { Registry } from './registry.js';
 import { PathPolicy, inside, relative, mime } from './path-policy.js';
 import { AppError } from './errors.js';
 import { describeFile, isTextFile, legacyIds } from './files.js';
 import { parseFileReference } from '../shared/model.js';
 import { readLegacyReferences } from './legacy-references.js';
+import { listTools } from './tools.js';
 import type { ServerResponse } from 'node:http';
 import { projectInput, mountInput, mountPatch, preferenceSchema, overrideSchema, previewPath, type Mount, type RegistryData, type TreeItem } from '../shared/model.js';
 
@@ -109,6 +110,22 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     return {...e,previewUrl:previewOrigin+previewPath(e.mountId,e.relativePath)};
   }
   main.get<{Params:{id:string}}>('/api/entries/:id',async req=>entry(req.params.id));
+  main.get('/api/tools', async () => listTools(registry.data, aliases));
+  main.put('/api/tools', async req => {
+    const input = z.object({ id: z.string().min(1), title: z.string().trim().min(1).max(200).optional() }).parse(req.body);
+    const file = await entry(input.id);
+    if (!/^html?$/.test(file.format)) throw new AppError('INVALID_TOOL', '请选择 HTML 网页作为工具', 400);
+    return changed(d => {
+      d.entryPreferences[file.id] = { ...d.entryPreferences[file.id], kind: 'tool', ...(input.title ? { title: input.title } : {}) };
+      return { id: file.id };
+    });
+  });
+  main.delete<{Params:{id:string}}>('/api/tools/:id', async req => {
+    const ref = parseFileReference(req.params.id);
+    if (!ref) throw new AppError('INVALID_TOOL', '无效的工具位置', 400);
+    relative(ref.relativePath, false);
+    return changed(d => { d.entryPreferences[req.params.id] = { ...d.entryPreferences[req.params.id], kind: 'html' }; return { ok: true }; });
+  });
   main.patch<{Params:{id:string}}>('/api/entries/:id/preferences',async req=>{
     const prefs=preferenceSchema.parse(req.body);const e=await entry(req.params.id);
     return changed(d=>{d.entryPreferences[e.id]={...d.entryPreferences[e.id],...prefs};return {ok:true};});

@@ -131,3 +131,13 @@
 - 解决方案：删除递归 Indexer、WatchManager 与扫描接口；目录单层按需读取，打开文件直接解析路径；已展开目录局部刷新，当前文件独立检查版本；HTML 保留手动更新提示，文本按偏好刷新。
 - 验证：单元测试验证挂载、改名、重启不调用 readdir，展开根只读取一次且不打开模板内容；文件访问、旧偏好、停用/恢复、安全边界与浏览器千文件场景回归。
 - 相关文件：app/server/server.ts、app/server/files.ts、app/shared/model.ts、app/web/App.tsx、app/web/Viewer.tsx、tests/background-scan.test.ts、tests/discovery.test.ts、tests/e2e/performance.spec.ts、README.md。
+
+## AD-014 — 文件浏览器重构后缺少独立工具入口
+
+- 日期：2026-09-21
+- 状态：已解决
+- 现象：重构后仅保留文件与收藏视图，原有工具无法从独立工具列表访问，HTML 也无法手动归类为常用工具。
+- 原因：移除自动工具发现时一并移除了工具视图，未提供基于明确文件位置的工具登记替代路径。
+- 解决方案：恢复单行工具列表，支持选择已挂载的 HTML 添加、当前预览加入/移除、命名和持久化；利用旧登记及位置映射恢复工具，不递归扫描。移除分类不删除源文件，不改变收藏。
+- 验证：工具接口测试覆盖持久化、去重、无扫描恢复、失效文件移除、非 HTML 与路径边界；浏览器验证预览加入、独立收藏、输入保留、文件选择及自定义名称。
+- 相关文件：app/server/tools.ts、app/server/server.ts、app/shared/model.ts、app/web/App.tsx、app/web/ToolPicker.tsx、app/web/Viewer.tsx、tests/tools.test.ts、tests/e2e/tools.spec.ts。

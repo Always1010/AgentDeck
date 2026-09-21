@@ -3,7 +3,7 @@ import type { Entry } from '../shared/model.js';
 import { api, ApiError } from './api.js';
 import { Markdown } from './Markdown.js';
 import { restoreFocus, shortcutFor } from './shortcuts.js';
-export function Viewer({id,favorite,toggleFavorite,back,navigate}:{id:string;favorite:boolean;toggleFavorite:()=>void;back:()=>void;navigate:(mountId:string,path:string)=>void}) {
+export function Viewer({id,tool,toggleTool,favorite,toggleFavorite,back,navigate}:{id:string;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;back:()=>void;navigate:(mountId:string,path:string)=>void}) {
   const [entry,setEntry]=useState<Entry>();const [text,setText]=useState('');const [source,setSource]=useState(false);
   const [version,setVersion]=useState(0);const [pending,setPending]=useState('');const [error,setError]=useState('');
   const [loading,setLoading]=useState(false);const [settings,setSettings]=useState(false);const [downloadOnly,setDownloadOnly]=useState(false);
@@ -36,6 +36,7 @@ export function Viewer({id,favorite,toggleFavorite,back,navigate}:{id:string;fav
   const download=entry?`/api/mounts/${entry.mountId}/download?path=${encodeURIComponent(entry.relativePath)}`:'';
   return <section className="viewer"><header className="toolbar"><div className="identity" title={entry?.relativePath}><strong>{entry?.title||'文件预览'}</strong></div><button disabled={loading} onClick={()=>void load()} title="重新加载文件">刷新</button><button aria-pressed={favorite} onClick={toggleFavorite}>{favorite?'★ 已收藏':'☆ 收藏'}</button><a href={`/preview?entry=${encodeURIComponent(id)}`} target="_blank" rel="noopener noreferrer">新标签</a><button ref={settingsButton} aria-label="更多设置" aria-expanded={settings} onClick={()=>setSettings(!settings)}>更多</button><button onClick={back} aria-label="关闭预览" title="关闭预览">×</button></header>
     {settings&&<div className="viewer-settings" id="viewer-settings">{entry&&<>
+      {/^html?$/.test(entry.format)&&<button aria-pressed={tool} onClick={toggleTool}>{tool?'从工具移除':'添加到工具'}</button>}
       {!downloadOnly&&<button onClick={()=>void toggleSource()}>{source?'返回阅读':'查看源码'}</button>}
       {!/^html?$/.test(entry.format)&&!downloadOnly&&<label className="inline"><input type="checkbox" checked={entry.refreshMode==='auto'} onChange={e=>void preference({refreshMode:e.target.checked?'auto':'prompt'})}/>自动更新文本</label>}
       <button onClick={()=>{const title=prompt('显示名称',entry.title);if(title)void preference({title});}}>显示名称</button><a href={download} download>下载原文件</a>
