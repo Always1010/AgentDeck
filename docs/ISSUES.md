@@ -41,3 +41,13 @@
 - 验证：HEAD 正文为空、状态与 Content-Length 正确；正式模式浏览器预览响应检查通过。
 - 相关文件：`app/server/server.ts`、`tests/security.test.ts`。
 
+
+## AD-005 — 测试依赖包含已知路径读取漏洞
+
+- 日期：2026-09-21
+- 状态：已解决
+- 现象：npm audit 报告 Vitest 3.2.7 及 @vitest/mocker 存在 GHSA-82fw-gwwq-j7x9（两项中危依赖报告）。
+- 原因：初始选用的测试框架版本未包含修复。该依赖不用于正式文件服务。
+- 解决方案：升级 Vitest 至 4.1.11 并更新锁文件。
+- 验证：7 项服务测试通过；安装审计为 0 项漏洞。
+- 相关文件：package.json、package-lock.json。
