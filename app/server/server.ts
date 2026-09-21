@@ -165,7 +165,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   }
   return { main, preview, registry, policy, index, mount, changed, mainOrigin, previewOrigin,
     setRegistryHandler(fn: () => Promise<void>) { onRegistryChange = fn; },
-    async listen() { try { await preview.listen({ port: options.previewPort, host: '127.0.0.1' }); await main.listen({ port: options.port, host: '127.0.0.1' }); } catch (e) { await preview.close(); await main.close(); throw e; } },
+    async listen() { try { await preview.listen({ port: options.previewPort, host: '127.0.0.1' }); await main.listen({ port: options.port, host: '127.0.0.1' }); } catch (e) { await watches.close();await vite?.close();await preview.close(); await main.close(); throw e; } },
     async close() { await watches.close();for(const c of clients)c.end();clients.clear();await vite?.close(); await Promise.all([main.close(), preview.close()]); }
   };
 }
