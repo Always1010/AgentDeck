@@ -5,8 +5,9 @@ import path from 'node:path';
 import os from 'node:os';
 test('production: process restart restores configuration; offline roots persist; occupied port exits',async()=>{
   test.setTimeout(45000);const temp=await fs.mkdtemp(path.join(os.tmpdir(),'agentdeck-restart-'));const root=path.join(temp,'content');await fs.mkdir(root);await fs.writeFile(path.join(root,'index.html'),'<title>恢复验证</title>');
-  const children:ChildProcess[]=[];const args=['dist/server/server/main.js','--state-dir',path.join(temp,'state'),'--port','4420','--preview-port','4421'];
-  const start=()=>{const child=spawn(process.execPath,args,{windowsHide:true,stdio:'pipe'});children.push(child);return child;};
+  const children:ChildProcess[]=[];const args=[path.resolve('dist/server/server/main.js'),'--state-dir',path.join(temp,'state'),'--port','4420','--preview-port','4421'];
+  // Launch from outside the checkout, as a login task or absolute-path command can do.
+  const start=()=>{const child=spawn(process.execPath,args,{cwd:temp,windowsHide:true,stdio:'pipe'});children.push(child);return child;};
   const stop=async(child:ChildProcess)=>{if(child.exitCode!==null||child.signalCode!==null)return;const closed=new Promise<void>(resolve=>child.once('exit',()=>resolve()));child.kill();await closed;};
   const waitReady=async()=>expect.poll(async()=>{try{return(await fetch('http://127.0.0.1:4420/')).status;}catch{return 0;}},{timeout:10000}).toBe(200);
   const request=async(url:string,method='GET',body?:unknown)=>{const response=await fetch('http://127.0.0.1:4420'+url,{method,headers:{'sec-fetch-site':'same-origin',origin:'http://127.0.0.1:4420','x-workbench':'1','content-type':'application/json'},body:method==='GET'?undefined:JSON.stringify(body||{})});return response.json();};

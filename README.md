@@ -26,11 +26,13 @@ npm start
 已有锁文件的干净安装使用 `npm ci`。`build` 只构建平台，不复制或打包挂载内容。正式服务同时监听回环地址：主平台 **4310**、预览 **4311**。请使用 `127.0.0.1`，严格 Host 校验不接受 localhost 别名。不静默换端口，不监听局域网。
 
 ```powershell
-npm start -- --state-dir "D:\Workbench-State"
+npm start -- --state-dir "$env:LOCALAPPDATA\AgentDeck-Test\state"
 npm start -- --port 4310 --preview-port 4311
 ```
 
-默认注册表在 Windows `%LOCALAPPDATA%\ProjectWorkbench\registry.json`，其他系统在 `~/.local/share/ProjectWorkbench`。同一个状态目录只运行一个服务实例。状态目录不能位于准备挂载的目录内。退出使用 Ctrl+C。
+默认注册表在 Windows `%LOCALAPPDATA%\AgentDeck\state\registry.json`，其他系统在 `~/.local/share/AgentDeck/state/registry.json`，均位于仓库外。首次使用默认路径启动时，若新注册表不存在，会校验并复制旧 `ProjectWorkbench/registry.json`，保留旧文件和新目录中的 `registry.json.legacy.bak`；指定 `--state-dir` 时不自动迁移。迁移前请停止使用旧注册表的服务。同一个状态目录只运行一个服务实例。状态目录不能位于准备挂载的目录内。退出使用 Ctrl+C。
+
+Windows 试运行可直接从当前仓库安装后台服务：`npm run background:install`，随后访问同一地址。它会构建正式版本、注册当前用户的 **AgentDeck 登录自启动任务**并立即启动，配置和日志留在 `%LOCALAPPDATA%\AgentDeck`。之后修改平台代码用 `npm run background:update` 停止、构建并重新启动；新增挂载/原内容无需执行更新命令。查看状态用 `npm run background:status`。完整命令、路径规则与限制见 [后台运行说明](docs/BACKGROUND.md)。
 
 ## 第一次使用与目录管理
 

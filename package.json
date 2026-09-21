@@ -13,7 +13,14 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "build:example": "vite build --config examples/company/tool/vite.config.ts"
+    "build:example": "vite build --config examples/company/tool/vite.config.ts",
+    "background:install": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/agentdeck.ps1 -Action Install",
+    "background:start": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/agentdeck.ps1 -Action Start",
+    "background:stop": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/agentdeck.ps1 -Action Stop",
+    "background:restart": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/agentdeck.ps1 -Action Restart",
+    "background:update": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/agentdeck.ps1 -Action Update",
+    "background:status": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/agentdeck.ps1 -Action Status",
+    "background:uninstall": "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/agentdeck.ps1 -Action Uninstall"
   },
   "dependencies": {
     "chokidar": "^4.0.3",
