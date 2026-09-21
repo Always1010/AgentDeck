@@ -6,7 +6,7 @@ import type { Entry, Mount, MountState } from '../shared/model.js';
 import { Registry } from './registry.js';
 import { PathPolicy, hidden, inside } from './path-policy.js';
 export const entryId = (mountId: string, key: string) => createHash('sha256').update(`${mountId}\0${key}`).digest('hex').slice(0,32);
-const readable = /\.(html?|md|markdown|txt|csv|json)$/i;
+const readable = /\.(html?|md|markdown|csv)$/i;
 const join = (...parts: string[]) => parts.filter(Boolean).join('/');
 export class Indexer {
   entries = new Map<string, Entry[]>();

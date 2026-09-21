@@ -57,7 +57,7 @@ Windows 试运行可直接从当前仓库安装后台服务：`npm run backgroun
 
 工具包优先使用平台入口覆盖，其次 `dist/index.html` / `build/index.html`。两个构建候选同时存在会提示选择；有 `package.json` 而无构建输出会提示待构建。工作台不会运行 npm 或包脚本。工具范围、入口、显示名、分类与刷新偏好只写注册表。
 
-预览 URL 保持目录关系，例如 `/m/<mountId>/reports/copper/index.html`，相邻 CSS/JS/图片/字体和 `fetch('./data.json')` 原样访问。支持目录首页补尾斜杠；所有资源 `no-store`；缺失 JS/CSS/JSON 返回错误，不回退为首页。
+内容列表默认索引 HTML、Markdown 和 CSV；JSON、TXT 不列入列表，但允许在授权范围内作为工具/页面资源访问。预览 URL 保持目录关系，例如 `/m/<mountId>/reports/copper/index.html`，相邻 CSS/JS/图片/字体和 `fetch('./data.json')` 原样访问。支持目录首页补尾斜杠；所有资源 `no-store`；缺失 JS/CSS/JSON 返回错误，不回退为首页。
 
 构建工具用相对资源地址，Vite 配置 `base: './'`，SPA 推荐 hash 路由。根绝对 `/assets/...`、history 路由、SSR、开发服务器代理和后端 API 不自动兼容。平台不重写 HTML、不注入统一布局，也没有报告/数据/来源/文件四页签或独立来源面板。
 
