@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, test, expect, vi } from 'vitest';
+import { beforeEach, afterEach, test, expect } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -13,7 +13,7 @@ test('traversal, encoded separators, secrets, unknown MIME and exclusions',async
   await fs.writeFile(path.join(root,'.env.local'),'secret');await fs.writeFile(path.join(root,'secret.key'),'secret');await fs.writeFile(path.join(root,'payload.exe'),'payload');await fs.writeFile(path.join(root,'private.txt'),'private');
   for(const p of ['../outside.txt','%2e%2e/outside.txt','%2e%2e%2foutside.txt','%5c..%5coutside.txt','C%3a%5cWindows%5cwin.ini','.env.local','secret.key','payload.exe','index.html%3a$DATA'])expect((await get(p)).statusCode).toBeGreaterThanOrEqual(400);
   await app.main.inject({method:'PATCH',url:`/api/mounts/${id}`,headers,payload:{excludes:['private.txt']}});
-  expect((await get('private.txt')).statusCode).toBe(403);await vi.waitFor(()=>expect(app.index.all().some(e=>e.relativePath==='private.txt')).toBe(false));
+  expect((await get('private.txt')).statusCode).toBe(403);expect((await app.main.inject({url:`/api/mounts/${id}/tree`,headers})).json().some((e:{name:string})=>e.name==='private.txt')).toBe(false);
   if(process.platform==='win32')expect((await get('PRIVATE.TXT')).statusCode).toBe(403);
   expect((await app.main.inject({url:`/api/mounts/${id}/download?path=..%2Foutside.txt`,headers})).statusCode).toBe(400);
 });

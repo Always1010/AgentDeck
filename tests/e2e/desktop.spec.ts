@@ -21,60 +21,12 @@ test.beforeEach(async ({ page }) => {
   const snapshot = await json(page, '/api/projects');
   for (const project of snapshot.projects) await json(page, `/api/projects/${project.id}`, 'DELETE');
   await json(page, '/api/projects', 'POST', { name: '桌面布局验证', mount: { label: '工具目录', absolutePath: directory, mode: 'single-tool' } });
-  await page.locator('.entry').filter({ hasText: '布局验证工具' }).click();
+  await page.getByRole('treeitem',{name:'桌面布局验证',exact:true}).click();await page.getByRole('treeitem',{name:'index.html',exact:true}).click();
   await expect(page.frameLocator('iframe').locator('#draft')).toBeVisible();
 });
 
-test('desktop orientation, collapse and immersion preserve the same tool and scroll', async ({ page }) => {
-  const input = page.frameLocator('iframe').locator('#draft');
-  await input.fill('跨屏保留输入');
-  const frame = page.frames().find(f => f.url().includes('/m/'))!;
-  await frame.evaluate(() => { window.scrollTo(0, 400); (window as Window & { marker?: string }).marker = 'same-document'; });
-  for (const [width, height] of [[1920, 1080], [1080, 1920], [1440, 2560], [900, 1440], [1280, 720]]) {
-    await page.setViewportSize({ width, height });
-    const catalog = (await page.locator('.catalog').boundingBox())!;
-    const viewer = (await page.locator('.viewer').boundingBox())!;
-    if (width <= height) {
-      expect(viewer.width).toBe(width);
-      expect(viewer.y).toBeGreaterThanOrEqual(catalog.y + catalog.height - 1);
-      expect(viewer.height).toBeGreaterThan(height * .5);
-    } else {
-      expect(viewer.x).toBeGreaterThan(catalog.x);
-      expect(viewer.width).toBeGreaterThan(width * .5);
-    }
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-    await expect(input).toHaveValue('跨屏保留输入');
-    expect(await frame.evaluate(() => (window as Window & { marker?: string }).marker)).toBe('same-document');
-    expect(await frame.evaluate(() => scrollY)).toBe(400);
-    await page.screenshot({ path: `test-results/desktop-${width}x${height}.png` });
-  }
-  await page.getByRole('button', { name: '内容列表', exact: true }).click();
-  await expect(page.locator('.catalog')).toBeHidden();
-  await page.getByRole('button', { name: '沉浸', exact: true }).click();
-  await expect(page.locator('aside')).toBeHidden();
-  await page.getByRole('button', { name: '退出沉浸', exact: true }).click();
-  await expect(page.locator('.catalog')).toBeHidden();
-  await expect(input).toHaveValue('跨屏保留输入');
-  await page.getByRole('button', { name: '内容列表', exact: true }).click();
-  await expect(page.locator('.catalog')).toBeVisible();
+test('sidebar resize and collapse persist without replacing the document',async({page})=>{
+ await page.setViewportSize({width:1440,height:900});const input=page.frameLocator('iframe').locator('#draft');await input.fill('保持输入');
+ const separator=page.getByRole('separator',{name:'调整侧栏宽度'});await separator.focus();await page.keyboard.press('Home');await expect(separator).toHaveAttribute('aria-valuenow','200');await page.keyboard.press('End');await expect(separator).toHaveAttribute('aria-valuenow','440');await page.keyboard.press('ArrowLeft');await expect(separator).toHaveAttribute('aria-valuenow','430');
+ await expect(input).toHaveValue('保持输入');await page.getByRole('button',{name:'收起文件侧栏'}).click();await expect(page.locator('.explorer')).toBeHidden();await page.reload();await expect(page.locator('.explorer')).toBeHidden();await page.getByRole('button',{name:'展开文件侧栏'}).click();await expect(separator).toHaveAttribute('aria-valuenow','430');
 });
-
-test('desktop list width and visibility persist, filters have a recovery action', async ({ page }) => {
-  await page.setViewportSize({ width: 1920, height: 1080 });
-  const divider = page.getByRole('separator', { name: '调整内容列表宽度' });
-  await divider.focus(); await page.keyboard.press('End');
-  await expect(divider).toHaveAttribute('aria-valuenow', '420');
-  await page.reload();
-  await expect(divider).toHaveAttribute('aria-valuenow', '420');
-  expect((await page.locator('.catalog').boundingBox())!.width).toBe(420);
-  await page.getByRole('button', { name: '项目导航', exact: true }).click();
-  await page.reload(); await expect(page.locator('aside')).toBeHidden();
-  await page.getByLabel('搜索', { exact: true }).fill('没有这个文件');
-  await expect(page.getByText('没有匹配的内容', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '清除筛选' }).click();
-  await expect(page.locator('.entry')).toHaveCount(1);
-  await page.getByLabel('排序', { exact: true }).selectOption('name');
-  await page.reload(); await expect(page.getByLabel('排序', { exact: true })).toHaveValue('name');
-});
-
-

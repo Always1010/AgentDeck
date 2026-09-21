@@ -25,14 +25,14 @@ test.beforeEach(async ({ page }) => {
   const snapshot = await json(page, '/api/projects');
   for (const project of snapshot.projects) await json(page, `/api/projects/${project.id}`, 'DELETE');
   await json(page, '/api/projects', 'POST', { name: '键盘验证', mount: { label: '主目录', absolutePath: root, toolDirectories: ['tools'] } });
-  await page.locator('.entry').filter({ hasText: '键盘验证工具' }).click();
+  await page.getByRole('treeitem',{name:'键盘验证',exact:true}).click();await page.getByRole('treeitem',{name:'tools',exact:true}).click();await page.getByRole('treeitem',{name:'index.html',exact:true}).click();
   await expect(page.frameLocator('iframe').locator('#draft')).toBeVisible();
 });
 
 test('single F toggles without reload; iframe typing is untouched; Escape closes one layer', async ({ page }) => {
   const input = page.frameLocator('iframe').locator('#draft');
   await input.fill('保留输入');
-  await page.locator('.entry.selected').focus();
+  await page.locator('.file-row.selected .node-main').focus();
   await page.keyboard.press('f');
   await expect(page.locator('.shell')).toHaveClass(/immersive/);
   await expect(page.getByRole('button', { name: '退出沉浸', exact: true })).toBeFocused();
@@ -51,16 +51,16 @@ test('single F toggles without reload; iframe typing is untouched; Escape closes
   await expect(page.locator('.shell')).toHaveClass(/immersive/);
   await page.keyboard.press('Escape');
   await expect(page.locator('.shell')).not.toHaveClass(/immersive/);
-  await expect(page.locator('.entry.selected')).toBeFocused();
+  await expect(page.locator('.file-row.selected .node-main')).toBeFocused();
   await expect(input).toHaveValue('保留输入f/?');
 });
 
 test('immersive search is temporary and list arrows do not replace a live tool', async ({ page }) => {
-  await page.getByRole('button', { name: '内容列表', exact: true }).click();
+  await page.getByRole('button', { name: '收起文件侧栏', exact: true }).click();
   await page.getByRole('button', { name: '沉浸', exact: true }).click();
   await page.keyboard.press('/');
-  const search = page.getByLabel('搜索', { exact: true });
-  await expect(search).toBeFocused(); await expect(page.locator('.catalog')).toBeVisible();
+  const search = page.getByLabel('筛选文件', { exact: true });
+  await expect(search).toBeFocused(); await expect(page.locator('.explorer')).toBeVisible();
   await search.fill('没有结果');
   await page.keyboard.press('Escape');
   await expect(page.locator('.shell')).toHaveClass(/immersive/);
@@ -68,20 +68,20 @@ test('immersive search is temporary and list arrows do not replace a live tool',
   await page.keyboard.press('/');
   await search.fill('.md');
   await page.keyboard.press('ArrowDown');
-  await expect(page.locator('.entry').first()).toBeFocused();
+  await expect(page.getByRole('treeitem',{name:'a.md',exact:true})).toBeFocused();
   await page.keyboard.press('ArrowDown');
-  await expect(page.locator('.entry').nth(1)).toBeFocused();
+  await expect(page.getByRole('treeitem',{name:'b.md',exact:true})).toBeFocused();
   await expect(page.frameLocator('iframe').locator('#draft')).toBeVisible();
   await page.keyboard.press('Enter');
   await expect(page.locator('.shell')).toHaveClass(/immersive/);
   await expect(page.locator('.markdown h1')).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.locator('.catalog')).toBeHidden();
-  expect(await page.evaluate(() => localStorage.getItem('layout.catalogCollapsed'))).toBe('true');
+  await expect(page.locator('.explorer')).toBeHidden();
+  expect(await page.evaluate(() => localStorage.getItem('explorer.collapsed'))).toBe('true');
 });
 
 test('form input, composition and modified shortcuts remain unhandled', async ({ page }) => {
-  const search = page.getByLabel('搜索', { exact: true });
+  const search = page.getByLabel('筛选文件', { exact: true });
   await search.fill('f/?');
   await expect(page.locator('.shell')).not.toHaveClass(/immersive/);
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -96,7 +96,7 @@ test('form input, composition and modified shortcuts remain unhandled', async ({
   });
   expect(unhandled).toBe(true);
   await expect(page.locator('.shell')).not.toHaveClass(/immersive/);
-  await page.getByRole('button', { name: '＋ 添加项目', exact: true }).click();
+  await page.getByRole('button', { name: '添加项目', exact: true }).click();
   await expect(page.getByLabel('项目名称', { exact: true })).toBeFocused();
   await page.getByLabel('项目名称', { exact: true }).fill('f/?');
   await page.getByRole('button', { name: '选择本机文件夹' }).click();
@@ -110,7 +110,7 @@ test('form input, composition and modified shortcuts remain unhandled', async ({
   await expect(page.getByRole('button', { name: '关闭', exact: true })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: '＋ 添加项目', exact: true })).toBeFocused();
+  await expect(page.getByRole('button', { name: '添加项目', exact: true })).toBeFocused();
 });
 
 test('single-key opt-out persists while buttons and Escape remain usable', async ({ page }) => {
@@ -131,7 +131,7 @@ test('single-key opt-out persists while buttons and Escape remain usable', async
 });
 
 test('Markdown reading position survives keyboard immersion and standalone preview can exit', async ({ page }) => {
-  await page.locator('.entry').filter({ hasText: 'a.md' }).click();
+  await page.getByRole('treeitem',{name:'a.md',exact:true}).click();
   await expect(page.locator('.markdown h1')).toHaveText('第一篇笔记');
   await page.locator('.reader').evaluate(el => { el.scrollTop = 500; });
   await page.getByRole('button', { name: '沉浸', exact: true }).focus();
