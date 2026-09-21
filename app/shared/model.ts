@@ -19,6 +19,7 @@ export type Snapshot = { projects: Project[]; mounts: (Mount & MountState)[]; re
 export type TreeItem = { name: string; relativePath: string; directory: boolean; legacyIds?: string[] };
 /** Reversible references allow opening files without an index. */
 export const fileReference = (mountId: string, relativePath: string) => `file:${mountId}:${relativePath}`;
+export type ToolItem = { id: string; title: string };
 export function parseFileReference(id: string) {
   const match = /^file:([^:]+):(.+)$/.exec(id);
   return match ? { mountId: match[1], relativePath: match[2] } : undefined;
