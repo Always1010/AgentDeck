@@ -81,3 +81,13 @@
 - 解决方案：Windows 下以不区分大小写方式匹配排除文件与目录；真实路径解析后再次校验排除项。
 - 验证：大小写别名返回 403，普通请求、源码/下载、junction 和越界回归通过。
 - 相关文件：app/server/path-policy.ts、tests/security.test.ts。
+
+## AD-009 — 挂载局部更新重置未提交的配置
+
+- 日期：2026-09-21
+- 状态：已解决
+- 现象：修改工具集合挂载路径后，状态在线但原工具 ID 消失；用途被重置为 content。停用/恢复等局部更新也受影响。
+- 原因：Zod 4 在含默认值的创建 schema 上使用 partial，仍可能为省略字段填入创建默认值。
+- 解决方案：共享契约增加不含默认值的独立 PATCH schema，只合并请求明确提交的字段。
+- 验证：重新定位前后工具 ID、入口覆盖、用途和显示名保持；停用/恢复、进程重新初始化和待构建状态测试通过。
+- 相关文件：app/shared/model.ts、app/server/server.ts、tests/discovery.test.ts。
