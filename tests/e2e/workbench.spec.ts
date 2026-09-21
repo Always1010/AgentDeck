@@ -20,6 +20,11 @@ test('production: add real projects and run native and built tools',async({page}
   await page.locator('.entry').filter({hasText:'铜市场 · 多文件演示'}).click();frame=page.frameLocator('iframe');await expect(frame.locator('#data')).toContainText('108');await expect(frame.locator('#data')).toContainText('CSV 已读取');await expect(frame.locator('img')).toBeVisible();
   expect((await json(page,'/api/projects')).data.projects).toHaveLength(3);
   await page.screenshot({path:'test-results/workbench.png',fullPage:true});
+  await page.setViewportSize({width:1080,height:1920});
+  await expect(frame.locator('#data')).toContainText('CSV 已读取');
+  await page.screenshot({path:'test-results/workbench-portrait.png',fullPage:true});
+  await page.getByRole('button',{name:'沉浸',exact:true}).click();
+  await page.screenshot({path:'test-results/workbench-immersive.png',fullPage:true});
 });
 
 test('production: append mount in UI, tree/search and overlapping tools registration',async({page})=>{

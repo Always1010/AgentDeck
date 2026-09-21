@@ -64,7 +64,18 @@
 
 另有两项测试本身调整：下拉框 accessible name 包含选项，改用匹配其真实名称；CORS 拒绝不保证浏览器发出可观察 response 事件，改验证真实请求失败并配合服务层 403 断言。Windows 正在监听的临时根直接重命名曾发生 EPERM；重新定位测试改为切换到另一已存在目录。没有声称 Windows 任意在线目录重命名已验证。
 
-## 未实现
+## 2026-09-21 桌面布局与快捷键增量验证
+
+- `node node_modules/typescript/bin/tsc --noEmit`：通过。
+- TypeScript 服务端编译、Vite 正式构建：通过；有依赖注释和约 507 kB 主包体积提示，非构建错误。
+- `node node_modules/vitest/vitest.mjs run`：6 个文件、11 项测试通过，包含快捷键与输入法/组合键排除规则。
+- `node node_modules/@playwright/test/cli.js test tests/e2e/shortcuts.spec.ts tests/e2e/desktop.spec.ts tests/e2e/workbench.spec.ts`：11 项通过。
+- Edge 无界面浏览器实际覆盖 1920×1080、1080×1920、1440×2560、900×1440、1280×720 CSS px；检查阅读区域尺寸、无页面横向溢出、同一 iframe 实例/输入/滚动保留。通过窗口尺寸模拟跨屏和缩放后的可用空间，未实际移动物理显示器上的窗口。
+- 验证列表宽度、折叠状态、排序记忆；沉浸临时搜索与取消恢复；方向键不切换工具，Enter 才打开；F/Esc 切换、逐层关闭弹窗、嵌套目录选择器、Tab 焦点循环及关闭后焦点恢复；单键禁用记忆；Markdown 滚动位置和独立预览退出。
+- 验证 iframe 中输入 `f/?` 不触发外层快捷键；Ctrl+K/L/J/F、Alt、Meta 和 F11 的合成事件不被工作台取消。IME 使用 isComposing/keyCode 229 合成事件验证；未声称实测所有物理输入法、浏览器扩展或操作系统热键。
+- 测试自身调整：DELETE 请求提供空 JSON 对象；滚动测试页面增高到 5000px，避免大竖屏下文档末尾的浏览器正常滚动限幅影响断言。
+
+## 未实现（延续 V1 范围）
 
 - P1 CSV 交互/基础表格、JSON 折叠树、小图片专用预览、标签和置顶；CSV/JSON 当前仅保真原文。
 - 高级数据分析、模型调用、脚本/构建自动执行、云部署、远程/UNC、多用户、逐项目来源隔离、history fallback、原生系统文件夹弹窗、自动工具状态保存、原子多文件发布，均属明确后置/不做范围。
