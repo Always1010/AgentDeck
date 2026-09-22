@@ -29,11 +29,13 @@ function browser(embedded = true) {
   vm.runInNewContext(htmlBridgeScript(mainOrigin), { window, document, location: { origin: 'http://127.0.0.1:4311' }, crypto: { randomUUID: () => 'session-one' }, Element: FakeElement, URL, requestAnimationFrame: (fn: () => void) => fn(), scrollX: 0, scrollY: 42 });
   const dispatch = (type: string, event = {}) => { for (const fn of handlers.get(type) || []) fn(event); };
   const configure = (config: BridgeConfig = fullConfig, extra: Record<string, unknown> = {}) => dispatch('message', { source: parent, origin: mainOrigin, data: { marker: BRIDGE_MARKER, version: BRIDGE_VERSION, session: 'session-one', type: 'config', config }, ...extra });
-  const key = (key: string, extra: Record<string, unknown> = {}, nodes: FakeElement[] = []) => {
+  const keyboard = (type: 'keydown' | 'keyup', key: string, extra: Record<string, unknown> = {}, nodes: FakeElement[] = []) => {
     const event = { key, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, repeat: false, isComposing: false, keyCode: 0, prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; }, composedPath: () => nodes, ...extra };
-    dispatch('keydown', event); return event;
+    dispatch(type, event); return event;
   };
-  return { sent, dispatch, configure, key, parent };
+  const key = (key: string, extra: Record<string, unknown> = {}, nodes: FakeElement[] = []) => keyboard('keydown', key, extra, nodes);
+  const keyup = (key: string, extra: Record<string, unknown> = {}, nodes: FakeElement[] = []) => keyboard('keyup', key, extra, nodes);
+  return { sent, dispatch, configure, key, keyup, parent, window };
 }
 
 describe('HTML response injection', () => {
@@ -133,6 +135,21 @@ describe('HTML response injection', () => {
 });
 
 describe('bridge runtime', () => {
+  test('suppresses only matching key releases, including after config changes, and clears ownership on window blur', () => {
+    const b = browser(); b.configure();
+    expect(b.key('ArrowLeft', { altKey: true, code: 'ArrowLeft' }).prevented).toBe(true);
+    // Releasing Alt first must not expose the paired ArrowLeft release to the page.
+    expect(b.keyup('ArrowLeft', { code: 'ArrowLeft' })).toMatchObject({ prevented: true, stopped: true });
+    expect(b.keyup('ArrowLeft', { code: 'ArrowLeft' }).prevented).toBe(false);
+    b.key('f', { code: 'KeyF' }); b.configure({ ...fullConfig, mode: 'web' });
+    expect(b.keyup('F', { code: 'KeyF', shiftKey: true }).prevented).toBe(true);
+    expect(b.key('b', { code: 'KeyB' }).prevented).toBe(false); expect(b.keyup('b', { code: 'KeyB' }).prevented).toBe(false);
+    b.configure(); const input = new FakeElement('INPUT');
+    expect(b.key('f', { code: 'KeyF' }, [input]).prevented).toBe(false); expect(b.keyup('f', { code: 'KeyF' }, [input]).prevented).toBe(false);
+    b.key('f', { code: 'KeyF' }); b.dispatch('blur', { target: input }); expect(b.keyup('f', { code: 'KeyF' }).prevented).toBe(true);
+    b.key('f', { code: 'KeyF' }); b.dispatch('blur', { target: b.window }); expect(b.keyup('f', { code: 'KeyF' }).prevented).toBe(false);
+  });
+
   test('a trusted parent can probe a new session while other sources and stale config remain rejected', () => {
     const b = browser();
     const data = { marker: BRIDGE_MARKER, version: BRIDGE_VERSION, type: 'probe', session: '' };

@@ -7,7 +7,9 @@ test('injected bridge intercepts before page handlers, preserves editors, and ro
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'agentdeck-bridge-browser-'));
   await fs.writeFile(path.join(root, 'probe.html'), `<!doctype html><html><head><meta charset="utf-8"><script>
     window.pageKeys = [];
+    window.pageReleases = [];
     window.addEventListener('keydown', event => window.pageKeys.push(event.key), true);
+    window.addEventListener('keyup', event => window.pageReleases.push(event.key), true);
   </script></head><body style="min-height:650px"><h1>中文桥接</h1><input id="draft"><div contenteditable="true" id="editor"></div>
   <a id="external" href="https://example.com/bridge-test">外链</a><a id="local" href="#section">目录</a><section id="section">章节</section></body></html>`);
   let projectId: string | undefined;
@@ -46,14 +48,18 @@ test('injected bridge intercepts before page handlers, preserves editors, and ro
     await expect.poll(() => page.evaluate(() => (window as any).bridgeMessages.some((m: any) => m.action === 'immersive'))).toBe(true);
     const child = page.frames().find(f => f.url() === url)!;
     expect(await child.evaluate(() => (window as any).pageKeys)).not.toContain('f');
+    expect(await child.evaluate(() => (window as any).pageReleases)).not.toContain('f');
     await frame.locator('#draft').fill(''); await frame.locator('#draft').press('f'); await expect(frame.locator('#draft')).toHaveValue('f');
     await frame.locator('#editor').press('b'); await expect(frame.locator('#editor')).toHaveText('b');
     await frame.locator('#draft').press('Alt+ArrowLeft');
     await expect.poll(() => page.evaluate(() => (window as any).bridgeMessages.some((m: any) => m.action === 'back'))).toBe(true);
+    expect(await child.evaluate(() => (window as any).pageReleases)).not.toContain('ArrowLeft');
     expect(page.url()).toBe('http://127.0.0.1:4410/');
     await page.evaluate(() => { (window as any).bridgeConfig.mode = 'web'; (window as any).configureBridge(); });
+    const releasesBefore = await child.evaluate(() => (window as any).pageReleases.filter((key: string) => key === 'f').length);
     await frame.locator('body').click({ position: { x: 600, y: 300 } }); await page.keyboard.press('f');
     await expect.poll(() => child.evaluate(() => (window as any).pageKeys.includes('f'))).toBe(true);
+    await expect.poll(() => child.evaluate(() => (window as any).pageReleases.filter((key: string) => key === 'f').length)).toBe(releasesBefore + 1);
     await context.route('https://example.com/bridge-test', route => route.fulfill({ contentType: 'text/html', body: '<h1>external</h1>' }));
     const popupEvent = page.waitForEvent('popup'); await frame.locator('#external').click(); const popup = await popupEvent;
     await popup.waitForLoadState(); expect(popup.url()).toBe('https://example.com/bridge-test'); expect(await popup.evaluate(() => window.opener)).toBeNull(); await popup.close();
