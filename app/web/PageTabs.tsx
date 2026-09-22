@@ -15,11 +15,11 @@ export function pageLabel(page: OpenPage, pages: OpenPage[], snapshot: Snapshot)
   return { name, display: duplicate ? `${name} · ${context || ref?.mountId || page.id}` : name, path };
 }
 
-type Props = { pages: OpenPage[]; active: string; snapshot: Snapshot; open: (id: string) => void; keep: (id: string) => void; close: (id: string) => void };
-export const pageTabId = (id: string) => `page-tab-${encodeURIComponent(id)}`;
-export const pagePanelId = (id: string) => `page-panel-${encodeURIComponent(id)}`;
+type Props = { scope?: string; pages: OpenPage[]; active: string; snapshot: Snapshot; open: (id: string) => void; keep: (id: string) => void; close: (id: string) => void };
+export const pageTabId = (id: string, scope = '') => `page-tab-${scope}-${encodeURIComponent(id)}`;
+export const pagePanelId = (id: string, scope = '') => `page-panel-${scope}-${encodeURIComponent(id)}`;
 
-export function PageTabs({ pages, active, snapshot, open, keep, close }: Props) {
+export function PageTabs({ scope, pages, active, snapshot, open, keep, close }: Props) {
   const bar = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{id: string; x: number; y: number}>();
   useEffect(() => {
@@ -39,13 +39,13 @@ export function PageTabs({ pages, active, snapshot, open, keep, close }: Props) 
     else if (e.key === 'End') next = pages.length - 1;
     else return;
     e.preventDefault(); open(pages[next].id);
-    document.getElementById(pageTabId(pages[next].id))?.focus();
+    document.getElementById(pageTabId(pages[next].id,scope))?.focus();
   }
   return <><div className="page-tabs" ref={bar} role="tablist" aria-label="已打开页面标签">
     {pages.map((page, index) => {
       const label = pageLabel(page, pages, snapshot);
       return <div className={`page-tab ${page.id === active ? 'active' : ''} ${page.kept ? '' : 'temporary'}`} key={page.id}>
-        <button id={pageTabId(page.id)} role="tab" aria-selected={page.id === active} aria-controls={pagePanelId(page.id)} tabIndex={page.id === active ? 0 : -1} title={`${label.path}${page.kept ? '' : '\n临时预览 · 双击保留页面'}`} onClick={() => open(page.id)} onDoubleClick={() => keep(page.id)} onContextMenu={e => { e.preventDefault(); setMenu({id:page.id,x:Math.min(e.clientX,window.innerWidth-190),y:Math.min(e.clientY,window.innerHeight-90)}); }} onKeyDown={e => { if(e.key==='F10'&&e.shiftKey){e.preventDefault();const r=e.currentTarget.getBoundingClientRect();setMenu({id:page.id,x:Math.min(r.left,window.innerWidth-190),y:r.bottom});}else keys(e,index); }}><span>{label.display}</span></button>
+        <button id={pageTabId(page.id,scope)} role="tab" aria-selected={page.id === active} aria-controls={pagePanelId(page.id,scope)} tabIndex={page.id === active ? 0 : -1} title={`${label.path}${page.kept ? '' : '\n临时预览 · 双击保留页面'}`} onClick={() => open(page.id)} onDoubleClick={() => keep(page.id)} onContextMenu={e => { e.preventDefault(); setMenu({id:page.id,x:Math.min(e.clientX,window.innerWidth-190),y:Math.min(e.clientY,window.innerHeight-90)}); }} onKeyDown={e => { if(e.key==='F10'&&e.shiftKey){e.preventDefault();const r=e.currentTarget.getBoundingClientRect();setMenu({id:page.id,x:Math.min(r.left,window.innerWidth-190),y:r.bottom});}else keys(e,index); }}><span>{label.display}</span></button>
         <button className="tab-action" aria-label={`关闭页面：${label.display}`} title="关闭页面" onClick={() => close(page.id)}><Icon name="close"/></button>
       </div>;
     })}

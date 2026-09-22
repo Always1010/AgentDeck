@@ -9,8 +9,9 @@ import { api } from './api.js';
 import { isBoolean, usePreference } from './preferences.js';
 import { ShortcutHelp } from './ShortcutHelp.js';
 import { Help } from './Help.js';
-import { initialPages, pagesReducer } from './pages.js';
+import { pagesReducer, type PageAction } from './pages.js';
 import { OpenPages, PageTabs, pageTabId } from './PageTabs.js';
+import { initialWorkspace, workspaceReducer, isLayout, type Layout, type PaneId } from './workspace.js';
 import { ThemePicker } from './Theme.js';
 import { isEditing, restoreFocus, shortcutFor } from './shortcuts.js';
 import { Settings, isHtmlOpening, type HtmlOpening } from './Settings.js';
@@ -21,7 +22,20 @@ const empty:Snapshot={projects:[],mounts:[],revision:0};
 export function App() {
   const standalone=location.pathname==='/preview';
   const [data,setData]=useState<Snapshot>(empty);
-  const [pages,dispatchPages]=useReducer(pagesReducer,new URLSearchParams(location.search).get('entry')||'',initialPages);
+  const [workspace,dispatchWorkspace]=useReducer(workspaceReducer,new URLSearchParams(location.search).get('entry')||'',initialWorkspace);
+  const pages=workspace.panes[workspace.active];
+  const dispatchPages=(action:PageAction,pane:PaneId=workspace.active)=>dispatchWorkspace(action.type==='aliases'?action:{type:'page',pane,action});
+  const [layout,setLayout]=usePreference<Layout>('reading.layout','single',isLayout);
+  const validRatio=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value)&&value>=20&&value<=80;
+  const [columnsRatio,setColumnsRatio]=usePreference('reading.columns-ratio',50,validRatio);
+  const [rowsRatio,setRowsRatio]=usePreference('reading.rows-ratio',50,validRatio);
+  const splitRatio=layout==='rows'?rowsRatio:columnsRatio;
+  const readingArea=useRef<HTMLElement>(null);
+  const paneDrag=useRef(false);
+  function resizePane(value:number){const next=Math.max(20,Math.min(80,value));if(layout==='rows')setRowsRatio(next);else setColumnsRatio(next);}
+  function activatePane(pane:PaneId){dispatchWorkspace({type:'activate',pane});}
+  function openOther(id:string){const pane=(1-workspace.active) as PaneId;if(layout==='single')setLayout('columns');dispatchPages({type:'open',id:aliasesRef.current[id]||id,keep:true},pane);activatePane(pane);}
+  useEffect(()=>{function focusFrame(){queueMicrotask(()=>{const pane=document.activeElement?.closest<HTMLElement>('[data-pane]');if(pane)activatePane(Number(pane.dataset.pane) as PaneId);});}window.addEventListener('blur',focusFrame);return()=>window.removeEventListener('blur',focusFrame);},[]);
   const selected=pages.active;
   const [openedExpanded,setOpenedExpanded]=usePreference('pages.expanded',true,isBoolean);
   const [favorites,setFavorites]=usePreference<string[]>('favorites',[],(v):v is string[]=>Array.isArray(v)&&v.every(x=>typeof x==='string'));
@@ -90,7 +104,7 @@ export function App() {
   async function changeTool(id:string,remove:boolean){try{await api(remove?`/api/tools/${encodeURIComponent(id)}`:'/api/tools',remove?'DELETE':'PUT',remove?undefined:{id});await reload();}catch(e){setError((e as Error).message);}}
   function favorite(id:string){const next=favoritesRef.current.includes(id)?favoritesRef.current.filter(x=>x!==id):[...favoritesRef.current,id];favoritesRef.current=next;setFavorites(next);}
   function finishSearch(cancel=true){if(cancel&&searchRestore.current)setQuery(searchRestore.current.query);setSearchActive(false);restoreFocus(cancel?searchRestore.current?.focus||null:immersionRef.current,immersionRef.current);searchRestore.current=null;}
-  function open(id:string,keep=false){dispatchPages({type:'open',id:aliasesRef.current[id]||id,keep});if(searchActive)finishSearch(false);if(matchMedia('(max-width: 640px)').matches)setCollapsed(true);}
+  function open(id:string,keep=false,pane:PaneId=workspace.active){dispatchPages({type:'open',id:aliasesRef.current[id]||id,keep},pane);if(searchActive)finishSearch(false);if(matchMedia('(max-width: 640px)').matches)setCollapsed(true);}
   function browserUrl(id:string){const ref=parseFileReference(aliasesRef.current[id]||id);return ref&&previewOrigin?previewOrigin+previewPath(ref.mountId,ref.relativePath):undefined;}
   function openFile(id:string,keep=false){
     const path=parseFileReference(aliasesRef.current[id]||id)?.relativePath||'';
@@ -101,11 +115,11 @@ export function App() {
     }
     open(id,keep);
   }
-  function keepPage(id:string){dispatchPages({type:'keep',id:aliasesRef.current[id]||id});}
-  function closePage(id:string){
-    const next=pagesReducer(pages,{type:'close',id});dispatchPages({type:'close',id});
+  function keepPage(id:string,pane:PaneId=workspace.active){dispatchPages({type:'keep',id:aliasesRef.current[id]||id},pane);}
+  function closePage(id:string,pane:PaneId=workspace.active){
+    const next=pagesReducer(workspace.panes[pane],{type:'close',id});dispatchPages({type:'close',id},pane);
     if(!next.items.length)setImmersive(false);
-    requestAnimationFrame(()=>{(document.getElementById(pageTabId(next.active))||sidebarRef.current)?.focus({preventScroll:true});});
+    requestAnimationFrame(()=>{(document.getElementById(pageTabId(next.active,`pane-${pane}`))||sidebarRef.current)?.focus({preventScroll:true});});
   }
   function toggleSidebar(){const show=!searchActive&&(immersive||collapsed);if(searchActive)finishSearch();if(show&&immersive)setImmersive(false);setCollapsed(!show);restoreFocus(sidebarRef.current);}
   function toggleImmersion(){if(!selected&&!immersive)return;if(searchActive)finishSearch();if(!immersive)immersionRestore.current=document.activeElement as HTMLElement|null;setImmersive(!immersive);restoreFocus(immersive?immersionRestore.current:immersionRef.current,immersionRef.current);}
@@ -114,7 +128,7 @@ export function App() {
     if(document.querySelector('[data-workbench-dialog]'))return;
     const action=shortcutFor(e,isEditing(e.target),shortcutsEnabled);
     if(action==='escape'){
-      if(document.getElementById('viewer-settings'))return;
+      if(document.querySelector('[data-viewer-settings]'))return;
       if(searchActive){e.preventDefault();finishSearch();}else if(immersive){e.preventDefault();toggleImmersion();}return;
     }
     if(action==='sidebar'){e.preventDefault();toggleSidebar();}
@@ -129,6 +143,7 @@ export function App() {
     <header className="workspace-header"><button ref={sidebarRef} className="sidebar-toggle" aria-keyshortcuts={shortcutsEnabled?'b':undefined} title={`${hidden?'展开文件侧栏':'收起文件侧栏'}${shortcutsEnabled?' · B（工作台获得焦点时）':''}`} aria-label={hidden?'展开文件侧栏':'收起文件侧栏'} aria-expanded={!hidden} onClick={toggleSidebar}><Icon name="sidebar"/>{shortcutsEnabled&&<kbd aria-hidden="true">B</kbd>}</button><strong className="brand">AgentDeck</strong><span className="workspace-context">本地文件工作台</span><div className="workspace-actions">
       {searchActive&&<button onClick={()=>finishSearch()}>结束筛选</button>}
       <button ref={immersionRef} className="immersion-toggle" disabled={!selected&&!immersive} aria-label={immersive?'退出沉浸':'沉浸'} aria-pressed={immersive} aria-keyshortcuts={shortcutsEnabled?'f':undefined} title={`${immersive?'退出沉浸':'沉浸阅读'}${shortcutsEnabled?' · F（工作台获得焦点时）':''}`} onClick={toggleImmersion}><Icon name={immersive?'collapse':'expand'}/><span>{immersive?'退出沉浸':'沉浸'}</span>{shortcutsEnabled&&<kbd aria-hidden="true">F</kbd>}</button>
+      <label className="layout-picker"><span className="sr-only">阅读布局</span><select aria-label="阅读布局" value={layout} onChange={e=>setLayout(e.target.value as Layout)}><option value="single">单屏</option><option value="columns">左右分屏</option><option value="rows">上下分屏</option></select></label>
       <ThemePicker/>
       <button aria-label="设置" onClick={()=>{location.hash='settings';setSettingsPage(true);}}>设置</button>
       <button aria-label="使用帮助" onClick={()=>setGuide(true)}>使用帮助</button>
@@ -147,25 +162,31 @@ export function App() {
           const mounts=data.mounts.filter(m=>m.projectId===project.id);
           return <div className="project-group" key={project.id}>
             {mounts.length!==1&&<div className="project-heading"><span>{project.name}</span><button aria-label={`管理项目：${project.name}`} onClick={()=>setManage(project.id)}>⋯</button></div>}
-            {mounts.map(m=><Tree key={m.id} mount={m} label={mounts.length===1?project.name:m.label} query={query} selected={selected} favorites={favorites} refresh={refresh} open={openFile} internal={open} browserUrl={browserUrl} favorite={favorite} discovered={discovered} manage={mounts.length===1?()=>setManage(project.id):undefined}/>)}
+            {mounts.map(m=><Tree key={m.id} mount={m} label={mounts.length===1?project.name:m.label} query={query} selected={selected} favorites={favorites} refresh={refresh} open={openFile} internal={open} browserUrl={browserUrl} other={openOther} favorite={favorite} discovered={discovered} manage={mounts.length===1?()=>setManage(project.id):undefined}/>)}
             {!mounts.length&&<p className="tree-message">尚未挂载目录</p>}
           </div>;
         })}{!data.projects.length&&<div className="catalog-empty"><p>挂载目录后，展开文件夹开始浏览。</p><button onClick={()=>setManage('new')}>添加项目</button></div>}</div>
         {view!=='files'&&<>{refs.map(({id,title,ref})=>{
           const mount=data.mounts.find(m=>m.id===ref?.mountId);const name=title||ref?.relativePath.split('/').pop()||'旧收藏（展开原目录后恢复）';
-          return <div className={`file-row ${id===selected?'selected':''}`} key={id}><button className="node-main" role="treeitem" aria-selected={id===selected} title={ref?`${mount?.label||'挂载不可用'} / ${ref.relativePath}${favoriteErrors[id]?' · '+favoriteErrors[id]:''}`:id} onClick={event=>{if(event.detail<=1)openFile(id);}} onDoubleClick={()=>openFile(id,true)}>{view==='tools'?<Icon name="tool"/>:<FileIcon name={name}/>}<span className="filename">{name}</span>{ref&&(!mount||!mount.enabled||favoriteErrors[id])&&<span className="node-status">不可用</span>}</button>{/\.html?$/i.test(ref?.relativePath||'')&&<FileOpenMenu name={name} url={browserUrl(id)} internal={()=>open(id)}/>}<button className={`row-action ${view==='tools'?'':'starred'}`} aria-label={`${view==='tools'?'移除工具':'取消收藏'}：${name}`} title={view==='tools'?'从工具列表移除，原文件保留':'取消收藏'} onClick={()=>view==='tools'?void changeTool(id,true):favorite(id)}>{view==='tools'?<Icon name="close"/>:'★'}</button></div>;
+          return <div className={`file-row ${id===selected?'selected':''}`} key={id}><button className="node-main" role="treeitem" aria-selected={id===selected} title={ref?`${mount?.label||'挂载不可用'} / ${ref.relativePath}${favoriteErrors[id]?' · '+favoriteErrors[id]:''}`:id} onClick={event=>{if(event.detail<=1)openFile(id);}} onDoubleClick={()=>openFile(id,true)}>{view==='tools'?<Icon name="tool"/>:<FileIcon name={name}/>}<span className="filename">{name}</span>{ref&&(!mount||!mount.enabled||favoriteErrors[id])&&<span className="node-status">不可用</span>}</button>{/\.html?$/i.test(ref?.relativePath||'')&&<FileOpenMenu name={name} url={browserUrl(id)} internal={()=>open(id)} other={()=>openOther(id)}/>}<button className={`row-action ${view==='tools'?'':'starred'}`} aria-label={`${view==='tools'?'移除工具':'取消收藏'}：${name}`} title={view==='tools'?'从工具列表移除，原文件保留':'取消收藏'} onClick={()=>view==='tools'?void changeTool(id,true):favorite(id)}>{view==='tools'?<Icon name="close"/>:'★'}</button></div>;
         })}{!refs.length&&<p className="tree-message">{query?'没有匹配的文件':view==='tools'?'点击上方＋添加 HTML，或在预览的更多菜单中加入工具。':'点击文件旁的星标，收藏常用文件。'}</p>}</>}
       </div><div className="explorer-footer">{view==='tools'?'常用 HTML 工具 · 原文件只读':view==='favorites'?'常用文件收藏':query?'仅筛选已加载的目录和文件':'按需展开 · 原文件只读'}</div>
     </aside>
     <div className="catalog-resizer" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-valuemin={200} aria-valuemax={440} aria-valuenow={width} tabIndex={hidden?-1:0} onPointerDown={e=>{if(e.button!==0)return;drag.current={x:e.clientX,width};e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(drag.current)resize(drag.current.width+e.clientX-drag.current.x);}} onPointerUp={e=>{drag.current=null;if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);}} onLostPointerCapture={()=>{drag.current=null;}} onKeyDown={e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();resize(e.key==='Home'?200:e.key==='End'?440:width+(e.key==='ArrowLeft'?-10:10));}}}/>
-    <main className="workspace-pages">
-      {!!pages.items.length&&<PageTabs pages={pages.items} active={selected} snapshot={data} open={open} keep={keepPage} close={closePage}/>}
-      {pages.items.length?pages.items.map(page=><Viewer key={page.id} id={page.id} active={page.id===selected} titleChanged={title=>dispatchPages({type:'title',id:page.id,title})} tool={tools.some(t=>t.id===page.id)} toggleTool={()=>void changeTool(page.id,tools.some(t=>t.id===page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} back={()=>{if(standalone&&pages.items.length===1)location.href='/';else closePage(page.id);}} navigate={(mountId,path)=>openFile(fileReference(mountId,path))}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>打开报告，专注阅读。</h2><p>单击预览文件，双击保留页面，随时切回继续阅读。</p>{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
+    <main ref={readingArea} className={`workspace-pages layout-${layout}`} style={{'--split-ratio':`${splitRatio}%`} as CSSProperties}>
+      {workspace.panes.map((pane,index)=>{
+        const paneId=index as PaneId;const visible=layout!=='single'||workspace.active===paneId;const scope=`pane-${paneId}`;
+        return <section key={paneId} className={`reading-pane ${workspace.active===paneId?'active-pane':''}`} data-pane={paneId} aria-label={`阅读区 ${paneId+1}`} hidden={!visible} inert={!visible} onPointerDownCapture={()=>activatePane(paneId)} onFocusCapture={()=>activatePane(paneId)}>
+          {!!pane.items.length&&<PageTabs scope={scope} pages={pane.items} active={pane.active} snapshot={data} open={id=>open(id,false,paneId)} keep={id=>keepPage(id,paneId)} close={id=>closePage(id,paneId)}/>}
+          {pane.items.length?pane.items.map(page=><Viewer scope={scope} key={page.id} id={page.id} active={visible&&page.id===pane.active} titleChanged={title=>dispatchPages({type:'title',id:page.id,title},paneId)} tool={tools.some(t=>t.id===page.id)} toggleTool={()=>void changeTool(page.id,tools.some(t=>t.id===page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} back={()=>{if(standalone&&pane.items.length===1)location.href='/';else closePage(page.id,paneId);}} navigate={(mountId,path)=>{activatePane(paneId);openFile(fileReference(mountId,path));}} other={()=>openOther(page.id)}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>{layout==='single'?'打开报告，专注阅读。':'选择文件，开始对照。'}</h2><p>点击此阅读区，再从侧栏选择文件。双击文件保留标签。</p>{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button onClick={()=>{activatePane(paneId);setCollapsed(false);}}>选择文件</button><button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
+        </section>;
+      })}
+      <div className="reading-resizer" hidden={layout==='single'} role="separator" tabIndex={layout==='single'?-1:0} aria-label="调整阅读区比例" aria-orientation={layout==='rows'?'horizontal':'vertical'} aria-valuemin={20} aria-valuemax={80} aria-valuenow={Math.round(splitRatio)} onPointerDown={e=>{if(e.button!==0)return;paneDrag.current=true;e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(!paneDrag.current)return;const rect=readingArea.current!.getBoundingClientRect();resizePane(layout==='rows'?(e.clientY-rect.top)/rect.height*100:(e.clientX-rect.left)/rect.width*100);}} onPointerUp={e=>{paneDrag.current=false;if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);}} onLostPointerCapture={()=>{paneDrag.current=false;}} onDoubleClick={()=>resizePane(50)} onKeyDown={e=>{if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key)){e.preventDefault();resizePane(e.key==='Home'?20:e.key==='End'?80:splitRatio+(['ArrowLeft','ArrowUp'].includes(e.key)?-2:2));}}}/>
     </main>
     {error&&<div className="toast" role="alert">{error}<button onClick={()=>setError('')}>关闭</button></div>}
     {manage&&<Management snapshot={data} project={data.projects.find(p=>p.id===manage)} close={()=>setManage(undefined)} saved={()=>{void reload();setRefresh(v=>v+1);}} removed={()=>{void reload();}}/>}
     {toolPicker&&<ToolPicker snapshot={data} close={()=>setToolPicker(false)} saved={()=>void reload()}/>}
     {guide&&<Help snapshot={data} selected={selected} close={()=>setGuide(false)} shortcuts={()=>setHelp(true)}/>}
     {help&&<ShortcutHelp close={()=>setHelp(false)} enabled={shortcutsEnabled} setEnabled={setShortcutsEnabled}/>}
-  </div>{settingsPage&&<Settings close={closeSettings} htmlOpening={htmlOpening} setHtmlOpening={setHtmlOpening} singles={shortcutsEnabled} setSingles={setShortcutsEnabled}/>}</>;
+  </div>{settingsPage&&<Settings close={closeSettings} htmlOpening={htmlOpening} setHtmlOpening={setHtmlOpening} singles={shortcutsEnabled} setSingles={setShortcutsEnabled} layout={layout} setLayout={setLayout}/>}</>;
 }
