@@ -5,10 +5,13 @@ import { Icon } from './Icon.js';
 import { Markdown } from './Markdown.js';
 import { restoreFocus, shortcutFor } from './shortcuts.js';
 import { pagePanelId, pageTabId } from './PageTabs.js';
-export function Viewer({scope,id,active,titleChanged,tool,toggleTool,favorite,toggleFavorite,back,navigate,other}:{scope?:string;other?:()=>void;id:string;active:boolean;titleChanged:(title:string)=>void;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;back:()=>void;navigate:(mountId:string,path:string)=>void}) {
+export function Viewer({initialScroll,positionChanged,scope,id,active,titleChanged,tool,toggleTool,favorite,toggleFavorite,back,navigate,other}:{initialScroll?:{x:number;y:number};positionChanged?:(position:{x:number;y:number})=>void;scope?:string;other?:()=>void;id:string;active:boolean;titleChanged:(title:string)=>void;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;back:()=>void;navigate:(mountId:string,path:string)=>void}) {
   const [entry,setEntry]=useState<Entry>();const [text,setText]=useState('');const [source,setSource]=useState(false);
   const [version,setVersion]=useState(0);const [pending,setPending]=useState('');const [error,setError]=useState('');
   const [loading,setLoading]=useState(false);const [settings,setSettings]=useState(false);const [downloadOnly,setDownloadOnly]=useState(false);
+  const readerRef=useRef<HTMLDivElement>(null);
+  const initialPosition=useRef(initialScroll);
+  useEffect(()=>{if(readerRef.current&&initialPosition.current){readerRef.current.scrollTo(initialPosition.current.x,initialPosition.current.y);}},[text,source]);
   const settingsButton=useRef<HTMLButtonElement>(null);const request=useRef(0);const live=useRef<Entry | undefined>(undefined);
   const sourceRef=useRef(source);sourceRef.current=source;
   const activeRef=useRef(active);activeRef.current=active;
@@ -55,7 +58,7 @@ export function Viewer({scope,id,active,titleChanged,tool,toggleTool,favorite,to
     {error&&<div role="alert">{error}<button onClick={()=>void load()}>重试</button></div>}
     {!entry?<div className="empty">{loading?'正在打开文件…':'文件暂不可用。旧收藏可在展开原目录后自动恢复。'}</div>:downloadOnly?<div className="empty"><p>此文件暂不支持文本预览，或超过 10 MiB。</p><a href={download} download>下载原文件</a></div>:<>
       {/^html?$/.test(entry.format)&&<iframe style={{display:source?'none':undefined}} key={`${id}:${version}`} title={entry.title} src={entry.previewUrl} sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"/>}
-      {(source||!/^html?$/.test(entry.format))&&<div className="reader">{!source&&/^(md|markdown)$/.test(entry.format)?<Markdown text={text} entry={entry} previewOrigin={new URL(entry.previewUrl!).origin} navigate={path=>navigate(entry.mountId,path)}/>:<pre>{text}</pre>}</div>}
+      {(source||!/^html?$/.test(entry.format))&&<div className="reader" ref={readerRef} onScroll={event=>positionChanged?.({x:event.currentTarget.scrollLeft,y:event.currentTarget.scrollTop})}>{!source&&/^(md|markdown)$/.test(entry.format)?<Markdown text={text} entry={entry} previewOrigin={new URL(entry.previewUrl!).origin} navigate={path=>navigate(entry.mountId,path)}/>:<pre>{text}</pre>}</div>}
     </>}
   </section>;
 }

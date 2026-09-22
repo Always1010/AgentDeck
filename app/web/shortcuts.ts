@@ -1,9 +1,14 @@
-export type Shortcut = 'immersive' | 'sidebar' | 'search' | 'help' | 'escape';
+export type Shortcut = 'immersive' | 'sidebar' | 'search' | 'help' | 'escape' | 'back' | 'forward';
 type KeyInput = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'altKey' | 'metaKey' | 'shiftKey' | 'isComposing' | 'repeat' | 'defaultPrevented' | 'keyCode'>;
 
-/** No modified browser/OS shortcuts are claimed. Escape remains available in forms. */
-export function shortcutFor(event: KeyInput, editing: boolean, enabled: boolean): Shortcut | undefined {
-  if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat || event.ctrlKey || event.altKey || event.metaKey) return;
+/** Navigation claims only exact Alt+arrows; other browser/OS combinations remain untouched. */
+export function shortcutFor(event: KeyInput, editing: boolean, enabled: boolean, navigation = false): Shortcut | undefined {
+  if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.ctrlKey || event.metaKey) return;
+  if (navigation && event.altKey && !event.shiftKey) {
+    if (event.key === 'ArrowLeft') return 'back';
+    if (event.key === 'ArrowRight') return 'forward';
+  }
+  if (event.repeat || event.altKey) return;
   if (event.key === 'Escape' && !event.shiftKey) return 'escape';
   if (!enabled || editing) return;
   if (event.key.toLowerCase() === 'b' && !event.shiftKey) return 'sidebar';

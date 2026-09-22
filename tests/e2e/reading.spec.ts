@@ -73,3 +73,31 @@ test('new files replace only the selected pane temporary page', async ({ page })
   await expect(pane(page, 1).locator('.markdown h1')).toHaveText('c');
   await expect(pane(page, 0).locator('.page-tab.temporary')).toHaveCount(0);
 });
+
+test('Alt history restores replaced text previews, isolates panes and truncates forward visits', async ({ page }) => {
+  const first = pane(page, 0), second = pane(page, 1);
+  await page.getByRole('treeitem', { name: 'a.md', exact: true }).click();
+  await expect(first.locator('.markdown h1')).toHaveText('a');
+  await first.locator('.reader').evaluate(el => { el.scrollTop = 450; });
+  await page.getByRole('treeitem', { name: 'b.md', exact: true }).click();
+  await page.getByRole('treeitem', { name: 'c.md', exact: true }).click();
+  await page.keyboard.press('Alt+ArrowLeft');
+  await expect(first.locator('.markdown h1')).toHaveText('b');
+  await page.keyboard.press('Alt+ArrowLeft');
+  await expect(first.locator('.markdown h1')).toHaveText('a');
+  await expect.poll(()=>first.locator('.reader').evaluate(el=>el.scrollTop)).toBe(450);
+  await page.keyboard.press('Alt+ArrowLeft');
+  await expect(first.locator('.markdown h1')).toHaveText('a');
+  await expect(page).toHaveURL(/127\.0\.0\.1:4410/);
+  await page.keyboard.press('Alt+ArrowRight');
+  await expect(first.locator('.markdown h1')).toHaveText('b');
+  await page.getByRole('treeitem', { name: 'd.md', exact: true }).click();
+  await expect(first.getByRole('button', { name: '前进', exact: true })).toBeDisabled();
+  await page.getByLabel('阅读布局', { exact: true }).selectOption('rows');
+  await second.getByRole('button', { name: '选择文件', exact: true }).click();
+  await page.getByRole('treeitem', { name: 'a.md', exact: true }).click();
+  await page.getByRole('treeitem', { name: 'c.md', exact: true }).click();
+  await page.keyboard.press('Alt+ArrowLeft');
+  await expect(second.locator('.markdown h1')).toHaveText('a');
+  await expect(first.locator('.markdown h1')).toHaveText('d');
+});
