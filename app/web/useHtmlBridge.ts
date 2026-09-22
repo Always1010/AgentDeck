@@ -4,7 +4,7 @@ import { BRIDGE_MARKER, BRIDGE_VERSION, type BridgeAction, type BridgeConfig } f
 export type ScrollPosition = { x: number; y: number };
 export type HtmlKeyMode = 'web' | 'workbench';
 export const isHtmlKeyMode = (value: unknown): value is HtmlKeyMode => value === 'web' || value === 'workbench';
-const actions = new Set<BridgeAction>(['back', 'forward', 'sidebar', 'immersive', 'search', 'help', 'escape', 'split-rows', 'split-columns', 'maximize', 'close-tab']);
+const actions = new Set<BridgeAction>(['back', 'forward', 'sidebar', 'immersive', 'search', 'help', 'escape', 'split-rows', 'split-columns', 'maximize', 'close-tab', 'close-pane']);
 
 export function useHtmlBridge({ url, version, config, action, focus, position, positionChanged }: {
   url?: string; version: number; config: BridgeConfig; action?: (action: BridgeAction) => void; focus?: () => void;

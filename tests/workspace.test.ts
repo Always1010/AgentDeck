@@ -105,3 +105,41 @@ test('splits copy only the active document into an independent pane and accept e
   expect(workspaceReducer(state, { type: 'split', pane: 0, direction: 'rows', file: 'other' }).panes[1].active).toBe('other');
   expect(workspaceReducer(initialWorkspace(), { type: 'split', pane: 0, direction: 'rows' }).panes[1].items).toEqual([]);
 });
+
+
+test('closing a populated pane collapses only its branch and preserves sibling state', () => {
+  let state = initialWorkspace('a');
+  state = workspaceReducer(state, { type: 'split', pane: 0, direction: 'columns', file: 'b' });
+  state = workspaceReducer(state, { type: 'split', pane: 1, direction: 'rows', file: 'c' });
+  state = workspaceReducer(state, { type: 'page', pane: 1, action: { type: 'open', id: 'd', keep: true } });
+  state = workspaceReducer(state, { type: 'resize', id: 'split-1', ratio: 40 });
+  state = workspaceReducer(state, { type: 'activate', pane: 1 });
+  const original = state;
+  state = workspaceReducer(state, { type: 'close-pane', pane: 1 });
+  expect(paneIds(state.root)).toEqual([0, 2]);
+  expect(state.root).toMatchObject({ ratio: 40, second: { type: 'pane', pane: 2 } });
+  expect(state.active).toBe(2);
+  expect(state.panes[1]).toBeUndefined(); expect(state.histories[1]).toBeUndefined();
+  expect(state.panes[0]).toBe(original.panes[0]); expect(state.panes[2]).toBe(original.panes[2]);
+  expect(state.histories[2]).toBe(original.histories[2]);
+  expect(state.nextPane).toBe(3);
+  expect(workspaceReducer(state, { type: 'close-pane', pane: 99 })).toBe(state);
+});
+
+test('closing a maximized pane restores remaining panes and final pane close resets its history', () => {
+  let state = initialWorkspace('a');
+  state = workspaceReducer(state, { type: 'split', pane: 0, direction: 'columns', file: 'b' });
+  state = workspaceReducer(state, { type: 'maximize', pane: 1 });
+  state = workspaceReducer(state, { type: 'close-pane', pane: 1 });
+  expect(state.maximized).toBeNull(); expect(state.active).toBe(0);
+  state = workspaceReducer(state, { type: 'page', pane: 0, action: { type: 'open', id: 'c' } });
+  state = workspaceReducer(state, { type: 'close-pane', pane: 0 });
+  expect(paneIds(state.root)).toEqual([0]); expect(state.panes[0].items).toEqual([]);
+  expect(state.panes[0].active).toBe(''); expect(state.panes[0].recent).toEqual([]);
+  expect(state.histories[0]).toEqual({ entries: [], index: -1 });
+  expect(state.nextPane).toBe(2);
+  state = workspaceReducer(state, { type: 'split', pane: 0, direction: 'rows' });
+  expect(paneIds(state.root)).toEqual([0, 2]);
+  state = workspaceReducer(state, { type: 'close-pane', pane: 0 });
+  expect(state.active).toBe(2); expect(state.panes[2].items).toEqual([]);
+});
