@@ -8,7 +8,7 @@ export const pane = (page: Page, index: number) => page.locator(`[data-pane="${i
 test.beforeAll(async () => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'agentdeck-reading-'));
   for (const name of ['a', 'b', 'c', 'd']) {
-    await fs.writeFile(path.join(root, `${name}.html`), `<title>${name}</title><input id="draft"><div style="height:3000px">${name}</div>`);
+    await fs.writeFile(path.join(root, `${name}.html`), `<title>${name}</title><input id="draft"><div style="height:3000px">${name}</div><script>window.pageKeys=0;window.addEventListener('keydown',e=>{if(e.key==='f')window.pageKeys++;},true)</script>`);
     await fs.writeFile(path.join(root, `${name}.md`), `# ${name}\n\n${'阅读内容\n\n'.repeat(200)}`);
   }
 });
@@ -100,4 +100,77 @@ test('Alt history restores replaced text previews, isolates panes and truncates 
   await page.keyboard.press('Alt+ArrowLeft');
   await expect(second.locator('.markdown h1')).toHaveText('a');
   await expect(first.locator('.markdown h1')).toHaveText('d');
+});
+
+test('HTML focus routes shortcuts to its own pane, protects typing and supports file overrides', async ({ page }) => {
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  const settings = page.getByRole('main', { name: '设置页面' });
+  await settings.getByRole('button', { name: '快捷键', exact: true }).click();
+  await settings.getByLabel('HTML 内快捷键处理').selectOption('workbench');
+  await settings.getByRole('button', { name: '返回工作台' }).click();
+  await page.getByRole('treeitem', { name: 'a.html', exact: true }).dblclick();
+  const first = pane(page, 0), second = pane(page, 1);
+  await expect(first.locator('.bridge-state')).toHaveText('工作台快捷键优先');
+  const frameA = page.frames().find(f => f.url().endsWith('/a.html'))!;
+  await first.frameLocator('iframe').locator('body').click({position:{x:60,y:150}});
+  await page.keyboard.press('f');
+  await expect(page.locator('.shell')).toHaveClass(/immersive/);
+  expect(await frameA.evaluate(()=>(window as unknown as {pageKeys:number}).pageKeys)).toBe(0);
+  await first.frameLocator('iframe').locator('#draft').fill('输入');
+  await page.keyboard.type('fb/?');
+  await expect(first.frameLocator('iframe').locator('#draft')).toHaveValue('输入fb/?');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.shell')).not.toHaveClass(/immersive/);
+  await page.getByLabel('阅读布局', { exact: true }).selectOption('columns');
+  await second.getByRole('button', { name: '选择文件', exact: true }).click();
+  await page.getByRole('treeitem', { name: 'b.html', exact: true }).click();
+  await page.getByRole('treeitem', { name: 'c.html', exact: true }).click();
+  await expect(second.locator('.bridge-state')).toHaveText('工作台快捷键优先');
+  await first.frameLocator('iframe').locator('body').click({position:{x:60,y:150}});
+  await second.frameLocator('iframe').locator('body').click({position:{x:60,y:150}});
+  await page.keyboard.press('Alt+ArrowLeft');
+  await expect(second.getByRole('tab')).toHaveText('b.html');
+  await expect(first.getByRole('tab')).toHaveText('a.html');
+  await second.getByRole('button', { name: '更多设置' }).click();
+  await second.getByLabel('此 HTML 快捷键').selectOption('web');
+  await page.keyboard.press('Escape');
+  await expect(second.locator('.bridge-state')).toHaveText('网页快捷键优先');
+  await second.frameLocator('iframe').locator('body').click({position:{x:60,y:150}});
+  await page.keyboard.press('f');
+  await expect(page.locator('.shell')).not.toHaveClass(/immersive/);
+  const frameB = page.frames().find(f=>f.url().endsWith('/b.html'))!;
+  expect(await frameB.evaluate(()=>(window as unknown as {pageKeys:number}).pageKeys)).toBe(1);
+});
+
+test('HTML history restores document scroll and failed bridge exposes unavailable status', async ({ page }) => {
+  await page.getByRole('treeitem', { name: 'a.html', exact: true }).click();
+  const first = pane(page, 0);
+  await expect(first.locator('.bridge-state')).toHaveAttribute('data-bridge-status','ready');
+  const frame = page.frames().find(f=>f.url().endsWith('/a.html'))!;
+  await frame.evaluate(()=>window.scrollTo(0,500));
+  // Give the scroll bridge a rendering frame to report the reading position.
+  await frame.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
+  await page.getByRole('treeitem', { name: 'b.html', exact: true }).click();
+  await first.getByRole('button', { name: '后退', exact: true }).click();
+  await expect.poll(async()=>page.frames().find(f=>f.url().endsWith('/a.html'))?.evaluate(()=>window.scrollY)).toBe(500);
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByRole('main', { name: '设置页面' }).getByRole('button', { name: '快捷键', exact: true }).click();
+  await page.getByLabel('HTML 内快捷键处理').selectOption('workbench');
+  await page.getByRole('button', { name: '返回工作台' }).click();
+  await page.route('**/__agentdeck/bridge.js',route=>route.abort());
+  await first.getByRole('button', { name: '刷新', exact: true }).click();
+  await expect(first.locator('.bridge-state')).toContainText('当前页面未接管快捷键');
+});
+
+test('Escape closes only the current pane settings', async ({ page }) => {
+  await page.getByRole('treeitem', { name: 'a.md', exact: true }).click();
+  await page.getByLabel('阅读布局', { exact: true }).selectOption('columns');
+  const first = pane(page, 0), second = pane(page, 1);
+  await second.getByRole('button', { name: '选择文件', exact: true }).click();
+  await page.getByRole('treeitem', { name: 'b.md', exact: true }).click();
+  await first.getByRole('button', { name: '更多设置' }).click();
+  await second.getByRole('button', { name: '更多设置' }).click();
+  await page.keyboard.press('Escape');
+  await expect(second.locator('[data-viewer-settings]')).toHaveCount(0);
+  await expect(first.locator('[data-viewer-settings]')).toBeVisible();
 });
