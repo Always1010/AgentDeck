@@ -102,6 +102,8 @@ export function htmlBridgeScript(mainOrigin: string): string {
   let config = { mode: 'web', singles: false, navigation: false, escape: false, active: false };
   let configured = false;
   let composing = false;
+  const claimedKeys = new Set();
+  const keyIdentity = event => event.code || event.key.toLowerCase();
   const send = (type, fields = {}) => {
     if (embedded) window.parent.postMessage({ marker, version, session, type, ...fields }, origin);
   };
@@ -152,9 +154,16 @@ export function htmlBridgeScript(mainOrigin: string): string {
     if (!action) return;
     event.preventDefault();
     event.stopImmediatePropagation();
+    claimedKeys.add(keyIdentity(event));
     // Repeats stay suppressed, but cannot toggle a layout or race through history.
     if (!event.repeat) { focus(); send('action', { action }); }
   }, true);
+  window.addEventListener('keyup', event => {
+    if (!claimedKeys.delete(keyIdentity(event))) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+  window.addEventListener('blur', event => { if (event.target === window) claimedKeys.clear(); }, true);
   const externalLink = event => {
     if (event.defaultPrevented) return;
     const anchor = event.composedPath().find(node => node instanceof Element && node.matches('a[href], area[href]'));

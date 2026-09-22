@@ -151,3 +151,13 @@
 - 解决方案：仅扫描最多 64 KiB 文档前缀确定插入点，以原编码的脚本字节拼接原始文件并流式输出；尊重真实 charset 声明与 UTF-16 BOM。HEAD 只读取有限前缀计算一致的 Content-Length，过长且无法完整确认的 prolog 保持原文。
 - 验证：单元测试覆盖 GBK、UTF-16 大小端、BOM、注释和脚本内伪 charset 声明、长文件流式输出；HTTP 回归确认 GET/HEAD 长度一致、下载原字节不变，以及原服务安全边界。
 - 相关文件：app/server/html-bridge.ts、app/server/server.ts、tests/html-bridge.test.ts。
+
+## AD-016 — 已接管按键的释放事件仍触发 HTML 自身快捷键
+
+- 日期：2026-09-22
+- 状态：已解决
+- 现象：本轮 HTML 快捷键桥接初版仅拦截 keydown；HTML 若在 keyup 绑定相同按键，按一次工作台快捷键仍可能触发网页操作，例如历史已经到头时 Alt＋← 被工作台处理后，网页仍收到 ArrowLeft 的 keyup。
+- 原因：keydown 的 preventDefault 与停止传播不影响后续独立派发的 keyup 事件。
+- 解决方案：记录实际已接管的按键 code，在对应 keyup 的捕获阶段阻止默认动作和后续处理；释放后移除记录，窗口失焦时清空记录。未接管按键和编辑输入保持原行为。
+- 验证：桥接运行测试覆盖配对释放、先松开 Alt、设置在按键期间变化、未接管输入，以及窗口失焦清理；浏览器集成用例增加网页 keyup 监听，检查接管模式不触发、网页模式仍触发。
+- 相关文件：app/server/html-bridge.ts、tests/html-bridge.test.ts、tests/e2e/bridge-server.spec.ts。
