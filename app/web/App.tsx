@@ -124,6 +124,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   const [searchActive,setSearchActive]=useState(false);
   const searchRef=useRef<HTMLInputElement>(null);
   const immersionRef=useRef<HTMLButtonElement>(null);
+  const immersionExitRef=useRef<HTMLButtonElement>(null);
   const sidebarRef=useRef<HTMLButtonElement>(null);
   const searchRestore=useRef<{query:string;focus:HTMLElement|null}|null>(null);
   const immersionRestore=useRef<HTMLElement|null>(null);
@@ -202,23 +203,33 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   function cancelPaneClose(){setClosingPane(null);focusPane(workspace.active,workspace.panes[workspace.active].active);}
   function closePreview(id:string,pane:PaneId=workspace.active){closePage(id,pane);}
   function toggleSidebar(){const show=!searchActive&&(immersive||collapsed);if(searchActive)finishSearch();if(show&&immersive)setImmersive(false);setCollapsed(!show);restoreFocus(sidebarRef.current);}
-  function toggleImmersion(){if(!selected&&!immersive)return;if(searchActive)finishSearch();if(!immersive)immersionRestore.current=document.activeElement as HTMLElement|null;setImmersive(!immersive);restoreFocus(immersive?immersionRestore.current:immersionRef.current,immersionRef.current);}
+  function toggleImmersion(){
+    if(!selected&&!immersive)return;
+    if(searchActive)finishSearch();
+    if(!immersive)immersionRestore.current=document.activeElement as HTMLElement|null;
+    setImmersive(!immersive);
+    requestAnimationFrame(()=>restoreFocus(immersive?immersionRestore.current:immersionExitRef.current,immersionRef.current));
+  }
   useEffect(()=>{const url=new URL(location.href);if(selected)url.searchParams.set('entry',selected);else url.searchParams.delete('entry');history.replaceState(null,'',url);},[selected]);
   function runAction(action:BridgeAction,pane:PaneId=workspace.active){
     if(document.querySelector('[data-workbench-dialog]'))return;
-    if(action==='split-rows'||action==='split-columns'){splitPane(action==='split-rows'?'rows':'columns',pane);return;}
-    if(action==='maximize'){dispatchWorkspace({type:'maximize',pane});return;}
-    if(action==='close-pane'){requestClosePane(pane);return;}
-    if(action==='close-tab'){closePage(workspace.panes[pane]?.active||'',pane);return;}
+    if(action==='split-rows'||action==='split-columns'){
+      if(immersive){setImmersive(false);requestAnimationFrame(()=>splitPane(action==='split-rows'?'rows':'columns',pane));}
+      else splitPane(action==='split-rows'?'rows':'columns',pane);
+      return;
+    }
+    if(action==='maximize'){if(immersive)setImmersive(false);if(!immersive||workspace.maximized===null)dispatchWorkspace({type:'maximize',pane});return;}
+    if(action==='close-pane'){if(immersive)setImmersive(false);requestClosePane(pane);return;}
+    if(action==='close-tab'){if(immersive)setImmersive(false);closePage(workspace.panes[pane]?.active||'',pane);return;}
     if(action==='back'||action==='forward'){dispatchWorkspace({type:'history',pane,direction:action==='back'?-1:1});return;}
     if(action==='escape'){
       if(document.querySelector(`[data-viewer-settings][data-pane="${pane}"]`))return;
-      if(searchActive)finishSearch();else if(workspace.maximized!==null)dispatchWorkspace({type:'maximize',pane:workspace.maximized});else if(immersive)toggleImmersion();return;
+      if(searchActive)finishSearch();else if(immersive)toggleImmersion();else if(workspace.maximized!==null)dispatchWorkspace({type:'maximize',pane:workspace.maximized});return;
     }
     if(action==='sidebar')toggleSidebar();
     if(action==='immersive'&&workspace.panes[pane].active)toggleImmersion();
     if(action==='help')setHelp(true);
-    if(action==='search'){if(!searchActive)searchRestore.current={query,focus:document.activeElement as HTMLElement|null};setSearchActive(true);requestAnimationFrame(()=>searchRef.current?.focus());}
+    if(action==='search'){if(immersive)setImmersive(false);if(!searchActive)searchRestore.current={query,focus:document.activeElement as HTMLElement|null};setSearchActive(true);requestAnimationFrame(()=>searchRef.current?.focus());}
   }
   useEffect(()=>{function keydown(e:KeyboardEvent){
     if(document.querySelector('[data-workbench-dialog]'))return;
@@ -267,16 +278,17 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
       </div><div className="explorer-footer">{view==='tools'?'常用 HTML 工具 · 原文件只读':view==='favorites'?'常用文件收藏':fileTypeFilter.mode!=='all'?`${fileTypeFilter.mode==='allow'?'白名单':'黑名单'} · ${fileTypeFilter.extensions.length} 种类型${query?' · 名称筛选中':''}`:query?'仅筛选已加载的目录和文件':'按需展开 · 原文件只读'}</div>
     </aside>
     <div className="catalog-resizer" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-valuemin={200} aria-valuemax={440} aria-valuenow={width} tabIndex={hidden?-1:0} onPointerDown={e=>{if(e.button!==0)return;drag.current={x:e.clientX,width};e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(drag.current)resize(drag.current.width+e.clientX-drag.current.x);}} onPointerUp={e=>{drag.current=null;if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);}} onLostPointerCapture={()=>{drag.current=null;}} onKeyDown={e=>{if(e.altKey||e.ctrlKey||e.metaKey||e.shiftKey||e.nativeEvent.isComposing)return;if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();resize(e.key==='Home'?200:e.key==='End'?440:width+(e.key==='ArrowLeft'?-10:10));}}}/>
-    <ReadingLayout workspace={workspace} resize={(id,ratio)=>dispatchWorkspace({type:'resize',id,ratio})}>
+    <ReadingLayout workspace={workspace} immersivePane={immersive?workspace.active:null} resize={(id,ratio)=>dispatchWorkspace({type:'resize',id,ratio})}>
       {(paneId,visible,style)=>{
         const pane=workspace.panes[paneId];const scope=`pane-${paneId}`;const history=workspace.histories[paneId];
         return <section key={paneId} tabIndex={-1} style={style} className={`reading-pane ${workspace.active===paneId?'active-pane':''}`} data-pane={paneId} aria-label={`阅读区 ${paneId+1}`} hidden={!visible} inert={!visible} onPointerDownCapture={()=>activatePane(paneId)} onFocusCapture={()=>activatePane(paneId)}>
           <div className="pane-navigation"><span>阅读区 {paneId+1}</span><button aria-label="后退" title="上一个文件 · Alt＋←" disabled={history.index<=0} onClick={()=>dispatchWorkspace({type:'history',pane:paneId,direction:-1})}>←</button><button aria-label="前进" title="下一个文件 · Alt＋→" disabled={history.index>=history.entries.length-1} onClick={()=>dispatchWorkspace({type:'history',pane:paneId,direction:1})}>→</button><button className="pane-close" aria-label={`关闭阅读区 ${paneId+1}`} title="关闭阅读区 · Q" aria-keyshortcuts={shortcutsEnabled?'q':undefined} onClick={()=>requestClosePane(paneId)}><Icon name="close"/></button></div>
           {!!pane.items.length&&<PageTabs scope={scope} pages={pane.items} active={pane.active} snapshot={data} open={id=>open(id,false,paneId)} keep={id=>keepPage(id,paneId)} close={id=>closePreview(id,paneId)}/>}
-          {pane.items.length?pane.items.map(page=><Viewer documentFontSize={documentFontSize} keyboardActive={workspace.active===paneId} bridgeConfig={{mode:htmlKeys,singles:shortcutsEnabled,navigation:navigationEnabled,escape:immersive||searchActive||workspace.maximized!==null,active:!settingsPage&&!help&&!guide&&!manage&&!toolPicker&&closingPane===null}} bridgeAction={action=>runAction(action,paneId)} focused={()=>activatePane(paneId)} initialScroll={positions.current.get(`${paneId}:${page.id}`)} positionChanged={position=>positionChanged(`${paneId}:${page.id}`,position)} scope={scope} key={page.id} id={page.id} active={visible&&page.id===pane.active} titleChanged={title=>dispatchPages({type:'title',id:page.id,title},paneId)} tool={tools.some(t=>t.id===page.id)} toggleTool={()=>void changeTool(page.id,tools.some(t=>t.id===page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} navigate={(mountId,path)=>{activatePane(paneId);openFile(fileReference(mountId,path),false,paneId);}} other={()=>openOther(page.id)}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>{Object.keys(workspace.panes).length===1?'打开报告，专注阅读。':'选择文件，开始对照。'}</h2><p>点击此阅读区，再从侧栏选择文件。双击文件保留标签。</p>{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button onClick={()=>{activatePane(paneId);setImmersive(false);setCollapsed(false);}}>选择文件</button><button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
+          {pane.items.length?pane.items.map(page=><Viewer documentFontSize={documentFontSize} keyboardActive={workspace.active===paneId} immersive={immersive} bridgeConfig={{mode:htmlKeys,singles:shortcutsEnabled,navigation:navigationEnabled,escape:immersive||searchActive||workspace.maximized!==null,active:!settingsPage&&!help&&!guide&&!manage&&!toolPicker&&closingPane===null}} bridgeAction={action=>runAction(action,paneId)} focused={()=>activatePane(paneId)} initialScroll={positions.current.get(`${paneId}:${page.id}`)} positionChanged={position=>positionChanged(`${paneId}:${page.id}`,position)} scope={scope} key={page.id} id={page.id} active={visible&&page.id===pane.active} titleChanged={title=>dispatchPages({type:'title',id:page.id,title},paneId)} tool={tools.some(t=>t.id===page.id)} toggleTool={()=>void changeTool(page.id,tools.some(t=>t.id===page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} navigate={(mountId,path)=>{activatePane(paneId);openFile(fileReference(mountId,path),false,paneId);}} other={()=>openOther(page.id)}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>{Object.keys(workspace.panes).length===1?'打开报告，专注阅读。':'选择文件，开始对照。'}</h2><p>点击此阅读区，再从侧栏选择文件。双击文件保留标签。</p>{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button onClick={()=>{activatePane(paneId);setImmersive(false);setCollapsed(false);}}>选择文件</button><button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
         </section>;
       }}
     </ReadingLayout>
+    {immersive&&<div className="immersion-exit-zone"><button ref={immersionExitRef} className="immersion-exit" aria-label="退出沉浸" title="退出沉浸 · F / Esc" onClick={toggleImmersion}>退出沉浸</button></div>}
     {(saveError||startupError)&&<div className="save-warning" role="alert">{saveError||startupError}{session&&<button onClick={retrySave}>重试保存</button>}</div>}
     {error&&<div className="toast" role="alert">{error}<button onClick={()=>setError('')}>关闭</button></div>}
     {manage&&<Management snapshot={data} project={data.projects.find(p=>p.id===manage)} close={()=>setManage(undefined)} saved={()=>{void reload();setRefresh(v=>v+1);}} removed={()=>{void reload();}}/>}

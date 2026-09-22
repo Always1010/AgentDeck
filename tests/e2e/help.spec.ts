@@ -132,7 +132,8 @@ test('help preserves Markdown reading position and immersion', async ({ page }) 
   await page.goto(`/preview?entry=${encodeURIComponent(fileReference(item.id, 'notes.md'))}`);
   await expect(page.locator('.markdown h1')).toHaveText('阅读位置');
   await page.locator('.reader').evaluate(el => { el.scrollTop = 500; });
-  await page.getByRole('button', { name: '使用帮助', exact: true }).click();
+  await page.keyboard.press('?');
+  await expect(page.getByRole('dialog', { name: '快捷键' })).toBeVisible();
   await page.keyboard.press('Escape');
   expect(await page.locator('.reader').evaluate(el => el.scrollTop)).toBe(500);
   await expect(page.locator('.shell')).toHaveClass(/immersive/);
