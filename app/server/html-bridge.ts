@@ -1,20 +1,94 @@
 import { BRIDGE_MARKER, BRIDGE_VERSION } from '../shared/bridge.js';
+import fs from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { Readable } from 'node:stream';
 
 export const bridgeScriptPath = '/__agentdeck/bridge.js';
+const scriptTag = `<script src="${bridgeScriptPath}"></script>`;
+export const htmlBridgePrefixLimit = 64 * 1024;
 
-/** Add a parser-blocking script before page scripts without rewriting the source file. */
-export function injectHtmlBridge(html: string): string {
-  const script = `<script src="${bridgeScriptPath}"></script>`;
+function injectionPosition(html: string, complete: boolean): number | null {
   let position = html.startsWith('\uFEFF') ? 1 : 0;
   // Only inspect the document prolog: a later comment or script can contain literal <head> text.
   while (position < html.length) {
-    const next = /^(?:\s+|<!--[\s\S]*?-->|<!doctype\b[^>]*>|<html\b(?:[^>"']|"[^"]*"|'[^']*')*>|<head\b(?:[^>"']|"[^"]*"|'[^']*')*>)/i.exec(html.slice(position));
-    if (!next) break;
+    const rest = html.slice(position);
+    const next = /^(?:\s+|<!--[\s\S]*?-->|<!doctype\b(?:[^>"']|"[^"]*"|'[^']*')*>|<html\b(?:[^>"']|"[^"]*"|'[^']*')*>|<head\b(?:[^>"']|"[^"]*"|'[^']*')*>)/i.exec(rest);
+    if (!next) {
+      // A very long prolog must remain untouched rather than inserting before an unseen doctype.
+      if (!complete && /^(?:<!--|<!doctype\b|<html\b|<head\b)/i.test(rest)) return null;
+      return position;
+    }
     position += next[0].length;
-    if (/^<head\b/i.test(next[0])) break;
+    if (/^<head\b/i.test(next[0])) return position;
   }
-  // The external script tag is short enough to keep an early charset declaration early.
-  return html.slice(0, position) + script + html.slice(position);
+  return complete ? position : null;
+}
+
+/** Add a parser-blocking script before page scripts without rewriting the source file. */
+export function injectHtmlBridge(html: string): string {
+  const position = injectionPosition(html, true)!;
+  return html.slice(0, position) + scriptTag + html.slice(position);
+}
+
+/** Plan an ASCII/UTF-16 insertion, preserving every original byte, including legacy encodings. */
+export function planHtmlBridge(prefix: Buffer, totalSize = prefix.length) {
+  const bom = prefix[0] === 0xff && prefix[1] === 0xfe ? 'utf-16le' : prefix[0] === 0xfe && prefix[1] === 0xff ? 'utf-16be' : prefix.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])) ? 'utf-8' : null;
+  const wide = bom === 'utf-16le' || bom === 'utf-16be';
+  const bomBytes = wide ? 2 : bom === 'utf-8' ? 3 : 0;
+  const raw = prefix.subarray(bomBytes, wide ? prefix.length - (prefix.length - bomBytes) % 2 : prefix.length);
+  const html = wide ? (bom === 'utf-16be' ? Buffer.from(raw).swap16() : raw).toString('utf16le') : raw.toString('latin1');
+  let charset = bom || 'utf-8';
+  if (!bom) {
+    // HTTP charset takes precedence over <meta>; retain a declared encoding instead of overriding it.
+    const head = html.slice(0, 1024);
+    const tokens = /<!--[\s\S]*?(?:-->|$)|<(script|style|title|textarea)\b(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?(?:<\/\1\s*>|$)|<meta\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi;
+    for (const match of head.matchAll(tokens)) {
+      if (!/^<meta\b/i.test(match[0])) continue;
+      const attributes = new Map<string, string>();
+      for (const attribute of match[0].slice(5, -1).matchAll(/([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g)) {
+        const name = attribute[1].toLowerCase();
+        if (!attributes.has(name)) attributes.set(name, attribute[2] ?? attribute[3] ?? attribute[4] ?? '');
+      }
+      const label = attributes.get('charset') || (attributes.get('http-equiv')?.toLowerCase() === 'content-type' ? /\bcharset\s*=\s*([\w-]+)/i.exec(attributes.get('content') || '')?.[1] : undefined);
+      if (!label) continue;
+      try {
+        const encoding = new TextDecoder(label).encoding;
+        // The HTML encoding algorithm treats UTF-16 declarations without a BOM as UTF-8.
+        charset = encoding.startsWith('utf-16') ? 'utf-8' : encoding;
+        break;
+      } catch { /* Ignore unsupported declarations, retaining the existing UTF-8 default. */ }
+    }
+  }
+  const position = injectionPosition(html, prefix.length >= totalSize);
+  const script = position === null ? Buffer.alloc(0) : Buffer.from(scriptTag, wide ? 'utf16le' : 'ascii');
+  if (bom === 'utf-16be') script.swap16();
+  return { offset: position === null ? 0 : bomBytes + position * (wide ? 2 : 1), script, contentType: `text/html; charset=${charset}` };
+}
+
+/** HEAD inspects at most a fixed prefix; GET streams the rest without decoding the document. */
+export async function prepareHtmlBridge(file: string, size: number) {
+  const handle = await fs.open(file, 'r');
+  const buffer = Buffer.alloc(Math.min(size, htmlBridgePrefixLimit));
+  let bytesRead = 0;
+  try {
+    while (bytesRead < buffer.length) {
+      const read = await handle.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead);
+      if (!read.bytesRead) break;
+      bytesRead += read.bytesRead;
+    }
+  } finally { await handle.close(); }
+  const prefix = buffer.subarray(0, bytesRead);
+  const plan = planHtmlBridge(prefix, size);
+  return {
+    contentType: plan.contentType,
+    contentLength: size + plan.script.length,
+    stream: () => Readable.from((async function* () {
+      yield prefix.subarray(0, plan.offset);
+      yield plan.script;
+      yield prefix.subarray(plan.offset);
+      if (size > prefix.length) yield* createReadStream(file, { start: prefix.length });
+    })()),
+  };
 }
 
 export function htmlBridgeScript(mainOrigin: string): string {

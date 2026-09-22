@@ -141,3 +141,13 @@
 - 解决方案：恢复单行工具列表，支持选择已挂载的 HTML 添加、当前预览加入/移除、命名和持久化；利用旧登记及位置映射恢复工具，不递归扫描。移除分类不删除源文件，不改变收藏。
 - 验证：工具接口测试覆盖持久化、去重、无扫描恢复、失效文件移除、非 HTML 与路径边界；浏览器验证预览加入、独立收藏、输入保留、文件选择及自定义名称。
 - 相关文件：app/server/tools.ts、app/server/server.ts、app/shared/model.ts、app/web/App.tsx、app/web/ToolPicker.tsx、app/web/Viewer.tsx、tests/tools.test.ts、tests/e2e/tools.spec.ts。
+
+## AD-015 — HTML 桥接初版注入改写非 UTF-8 字节且 HEAD 读取完整文件
+
+- 日期：2026-09-22
+- 状态：已解决
+- 现象：本轮新增 HTML 桥接的初版实现将所有 HTML 按 UTF-8 解码后重新编码，GBK 等编码中的原字节被替换字符破坏；HEAD 元数据检查也完整读取和构造 HTML 响应。此问题在本轮实现审查中确认，不是历史用户问题。
+- 原因：注入流程使用 `fs.readFile(file, 'utf8')` 并统一构造 UTF-8 Buffer，GET 与 HEAD 共用完整文件转换；固定响应 charset 也会覆盖原页面声明。
+- 解决方案：仅扫描最多 64 KiB 文档前缀确定插入点，以原编码的脚本字节拼接原始文件并流式输出；尊重真实 charset 声明与 UTF-16 BOM。HEAD 只读取有限前缀计算一致的 Content-Length，过长且无法完整确认的 prolog 保持原文。
+- 验证：单元测试覆盖 GBK、UTF-16 大小端、BOM、注释和脚本内伪 charset 声明、长文件流式输出；HTTP 回归确认 GET/HEAD 长度一致、下载原字节不变，以及原服务安全边界。
+- 相关文件：app/server/html-bridge.ts、app/server/server.ts、tests/html-bridge.test.ts。

@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import vm from 'node:vm';
 import { createWorkbench } from '../app/server/server.js';
-import { bridgeScriptPath, htmlBridgeScript, injectHtmlBridge } from '../app/server/html-bridge.js';
+import { bridgeScriptPath, htmlBridgePrefixLimit, htmlBridgeScript, injectHtmlBridge, planHtmlBridge, prepareHtmlBridge } from '../app/server/html-bridge.js';
 import { BRIDGE_MARKER, BRIDGE_VERSION, type BridgeConfig, type BridgeMessage } from '../app/shared/bridge.js';
 
 const mainOrigin = 'http://127.0.0.1:4310';
@@ -37,6 +37,48 @@ function browser(embedded = true) {
 }
 
 describe('HTML response injection', () => {
+  test('preserves legacy and UTF-16 bytes and honors actual encoding declarations', () => {
+    const legacy = Buffer.concat([Buffer.from('<!doctype html><html><head><meta charset="GBK"></head><body>'), Buffer.from([0xd6, 0xd0, 0xce, 0xc4]), Buffer.from('</body></html>')]);
+    const plan = planHtmlBridge(legacy);
+    expect(plan.contentType).toBe('text/html; charset=gbk');
+    const injected = Buffer.concat([legacy.subarray(0, plan.offset), plan.script, legacy.subarray(plan.offset)]);
+    expect(injected.includes(Buffer.from([0xd6, 0xd0, 0xce, 0xc4]))).toBe(true);
+    expect(Buffer.concat([injected.subarray(0, plan.offset), injected.subarray(plan.offset + plan.script.length)])).toEqual(legacy);
+    for (const endian of ['le', 'be']) {
+      const source = Buffer.from('\uFEFF<!doctype html><html><head></head><body>中文 🧭</body></html>', 'utf16le');
+      if (endian === 'be') source.swap16();
+      const wide = planHtmlBridge(source);
+      expect(wide.contentType).toBe(`text/html; charset=utf-16${endian}`);
+      const result = Buffer.concat([source.subarray(0, wide.offset), wide.script, source.subarray(wide.offset)]);
+      if (endian === 'be') result.swap16();
+      expect(result.toString('utf16le')).toBe(injectHtmlBridge('\uFEFF<!doctype html><html><head></head><body>中文 🧭</body></html>'));
+    }
+    for (const decoy of ['<!-- <meta charset="gbk"> -->', '<script>const x = \'<meta charset="gbk">\';</script>', '<meta data-charset="gbk">', '<meta content="text/html; charset=gbk">']) {
+      expect(planHtmlBridge(Buffer.from(`<!doctype html><html><head>${decoy}</head><body>中文</body></html>`)).contentType).toBe('text/html; charset=utf-8');
+    }
+    expect(planHtmlBridge(Buffer.from('<meta http-equiv="Content-Type" content="text/html; charset=GBK">')).contentType).toBe('text/html; charset=gbk');
+    expect(planHtmlBridge(Buffer.from('\uFEFF<meta charset="gbk">')).contentType).toBe('text/html; charset=utf-8');
+  });
+
+  test('bounds prefix reads for HEAD and streams the unchanged document remainder', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'agentdeck-bridge-large-'));
+    const file = path.join(directory, 'large.html');
+    const source = Buffer.from('<!doctype html><head><meta charset="utf-8"></head><body>' + '中文'.repeat(htmlBridgePrefixLimit) + '</body>');
+    try {
+      await fs.writeFile(file, source);
+      const response = await prepareHtmlBridge(file, source.length);
+      const plan = planHtmlBridge(source.subarray(0, htmlBridgePrefixLimit), source.length);
+      expect(response.contentLength).toBe(source.length + plan.script.length);
+      const chunks: Buffer[] = []; for await (const chunk of response.stream()) chunks.push(chunk);
+      const body = Buffer.concat(chunks);
+      expect(body.length).toBe(response.contentLength);
+      expect(Buffer.concat([body.subarray(0, plan.offset), body.subarray(plan.offset + plan.script.length)])).toEqual(source);
+      // An unfinished prolog beyond the read budget is served intact rather than placing a script before its doctype.
+      const longProlog = Buffer.from('<!--' + 'x'.repeat(htmlBridgePrefixLimit));
+      expect(planHtmlBridge(longProlog.subarray(0, htmlBridgePrefixLimit), longProlog.length + 100).script.length).toBe(0);
+    } finally { await fs.rm(directory, { recursive: true, force: true }); }
+  });
+
   test('retains doctype, Unicode, charset and inserts before document scripts', () => {
     const html = '<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><script>网页脚本()</script></head><body>中文 🧭</body></html>';
     const result = injectHtmlBridge(html);
@@ -72,6 +114,20 @@ describe('HTML response injection', () => {
       expect((await app.main.inject({ url: `/api/mounts/${id}/file?path=index.html`, headers })).json().text).toBe(html);
       expect((await app.preview.inject({ url: `/m/${id}/data.csv`, headers: previewHeaders })).body).toBe('x,y\n1,2');
       expect(await fs.readFile(path.join(root, 'index.html'), 'utf8')).toBe(html);
+      const encoded = [
+        { name: 'legacy.html', bytes: Buffer.concat([Buffer.from('<!doctype html><head><meta charset="GBK"></head><p>'), Buffer.from([0xd6, 0xd0, 0xce, 0xc4]), Buffer.from('</p>')]), charset: 'gbk' },
+        { name: 'wide.html', bytes: Buffer.from('\uFEFF<!doctype html><head></head><p>中文 🧭</p>', 'utf16le'), charset: 'utf-16le' },
+      ];
+      for (const fixture of encoded) {
+        await fs.writeFile(path.join(root, fixture.name), fixture.bytes);
+        const served = await app.preview.inject({ url: `/m/${id}/${fixture.name}`, headers: previewHeaders });
+        const metadata = await app.preview.inject({ method: 'HEAD', url: `/m/${id}/${fixture.name}`, headers: previewHeaders });
+        const plan = planHtmlBridge(fixture.bytes);
+        expect(served.headers['content-type']).toBe(`text/html; charset=${fixture.charset}`);
+        expect(served.rawPayload).toEqual(Buffer.concat([fixture.bytes.subarray(0, plan.offset), plan.script, fixture.bytes.subarray(plan.offset)]));
+        expect(metadata.headers['content-length']).toBe(String(served.rawPayload.length));
+        expect((await app.main.inject({ url: `/api/mounts/${id}/download?path=${fixture.name}`, headers })).rawPayload).toEqual(fixture.bytes);
+      }
     } finally { await app.close(); await fs.rm(temp, { recursive: true, force: true }); }
   });
 });
