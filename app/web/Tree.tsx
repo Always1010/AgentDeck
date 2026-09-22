@@ -50,6 +50,7 @@ export function Tree({mount,label,query,selected,favorites,refresh,open,internal
     return <div role="none" key={path}>
       <div className="file-row" style={{paddingLeft:8+depth*14}}>
         <button className="node-main folder" role="treeitem" aria-level={depth+1} aria-expanded={opened} disabled={!mount.enabled} title={root?mount.absolutePath:path} onClick={()=>toggle(path)} onKeyDown={e=>{
+          if(e.altKey||e.ctrlKey||e.metaKey||e.shiftKey||e.nativeEvent.isComposing)return;
           if(e.key==='ArrowRight'&&!opened){e.preventDefault();toggle(path);}else if(e.key==='ArrowLeft'&&opened){e.preventDefault();toggle(path);}
         }}><span className="chevron" aria-hidden="true">{listing?.loading?'·':opened?'▾':'▸'}</span><span className="filename">{name}</span>{!mount.enabled&&<span className="node-status">停用</span>}</button>
         {root&&manage&&<button className="row-action" aria-label={`管理项目：${label}`} title="管理目录" onClick={manage}>⋯</button>}
