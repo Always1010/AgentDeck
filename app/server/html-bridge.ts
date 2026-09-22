@@ -108,7 +108,9 @@ export function htmlBridgeScript(mainOrigin: string): string {
   window.addEventListener('message', event => {
     if (!embedded || event.source !== window.parent || event.origin !== origin) return;
     const data = event.data;
-    if (!data || data.marker !== marker || data.version !== version || data.session !== session) return;
+    if (!data || data.marker !== marker || data.version !== version) return;
+    if (data.type === 'probe') { send('ready'); return; }
+    if (data.session !== session) return;
     if (data.type === 'config') {
       const value = data.config;
       if (!value || !['web', 'workbench'].includes(value.mode) ||
