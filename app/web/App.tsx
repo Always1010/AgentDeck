@@ -8,6 +8,7 @@ import { Viewer } from './Viewer.js';
 import { api } from './api.js';
 import { isBoolean, usePreference } from './preferences.js';
 import { ShortcutHelp } from './ShortcutHelp.js';
+import { Help } from './Help.js';
 import { isEditing, restoreFocus, shortcutFor } from './shortcuts.js';
 import './style.css';
 const empty:Snapshot={projects:[],mounts:[],revision:0};
@@ -31,6 +32,7 @@ export function App() {
   const [width,setWidth]=usePreference('explorer.width',280,(v):v is number=>typeof v==='number'&&Number.isFinite(v)&&v>=200&&v<=440);
   const [shortcutsEnabled,setShortcutsEnabled]=usePreference('shortcuts.enabled',true,isBoolean);
   const [help,setHelp]=useState(false);
+  const [guide,setGuide]=useState(false);
   const [searchActive,setSearchActive]=useState(false);
   const searchRef=useRef<HTMLInputElement>(null);
   const immersionRef=useRef<HTMLButtonElement>(null);
@@ -97,6 +99,7 @@ export function App() {
     <header className="workspace-header"><button ref={sidebarRef} className="sidebar-toggle" aria-keyshortcuts={shortcutsEnabled?'b':undefined} title={`${hidden?'展开文件侧栏':'收起文件侧栏'}${shortcutsEnabled?' · B（工作台获得焦点时）':''}`} aria-label={hidden?'展开文件侧栏':'收起文件侧栏'} aria-expanded={!hidden} onClick={toggleSidebar}><Icon name="sidebar"/>{shortcutsEnabled&&<kbd aria-hidden="true">B</kbd>}</button><strong className="brand">AgentDeck</strong><span className="workspace-context">本地文件工作台</span><div className="workspace-actions">
       {searchActive&&<button onClick={()=>finishSearch()}>结束筛选</button>}
       <button ref={immersionRef} className="immersion-toggle" disabled={!selected&&!immersive} aria-label={immersive?'退出沉浸':'沉浸'} aria-pressed={immersive} aria-keyshortcuts={shortcutsEnabled?'f':undefined} title={`${immersive?'退出沉浸':'沉浸阅读'}${shortcutsEnabled?' · F（工作台获得焦点时）':''}`} onClick={toggleImmersion}><Icon name={immersive?'collapse':'expand'}/><span>{immersive?'退出沉浸':'沉浸'}</span>{shortcutsEnabled&&<kbd aria-hidden="true">F</kbd>}</button>
+      <button aria-label="使用帮助" onClick={()=>setGuide(true)}>使用帮助</button>
       <button aria-label="快捷键" title="快捷键" onClick={()=>setHelp(true)}>?</button>
     </div></header>
     <aside className="explorer" aria-label="文件资源浏览器" aria-hidden={hidden}>
@@ -122,10 +125,11 @@ export function App() {
       </div><div className="explorer-footer">{view==='tools'?'常用 HTML 工具 · 原文件只读':view==='favorites'?'常用文件收藏':query?'仅筛选已加载的目录和文件':'按需展开 · 原文件只读'}</div>
     </aside>
     <div className="catalog-resizer" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-valuemin={200} aria-valuemax={440} aria-valuenow={width} tabIndex={hidden?-1:0} onPointerDown={e=>{if(e.button!==0)return;drag.current={x:e.clientX,width};e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(drag.current)resize(drag.current.width+e.clientX-drag.current.x);}} onPointerUp={e=>{drag.current=null;if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);}} onLostPointerCapture={()=>{drag.current=null;}} onKeyDown={e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();resize(e.key==='Home'?200:e.key==='End'?440:width+(e.key==='ArrowLeft'?-10:10));}}}/>
-    {selected?<Viewer key={selected} id={selected} tool={tools.some(t=>t.id===selected)} toggleTool={()=>void changeTool(selected,tools.some(t=>t.id===selected))} favorite={favorites.includes(selected)} toggleFavorite={()=>favorite(selected)} back={()=>{if(standalone)location.href='/';else{setSelected('');setImmersive(false);}}} navigate={(mountId,path)=>open(fileReference(mountId,path))}/>:<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>打开文件，专注阅读。</h2><p>从左侧展开目录，选择 HTML、Markdown、CSV 或代码文件。</p>{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}</div></section>}
+    {selected?<Viewer key={selected} id={selected} tool={tools.some(t=>t.id===selected)} toggleTool={()=>void changeTool(selected,tools.some(t=>t.id===selected))} favorite={favorites.includes(selected)} toggleFavorite={()=>favorite(selected)} back={()=>{if(standalone)location.href='/';else{setSelected('');setImmersive(false);}}} navigate={(mountId,path)=>open(fileReference(mountId,path))}/>:<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>打开文件，专注阅读。</h2><p>从左侧展开目录，选择 HTML、Markdown、CSV 或代码文件。</p>{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
     {error&&<div className="toast" role="alert">{error}<button onClick={()=>setError('')}>关闭</button></div>}
     {manage&&<Management snapshot={data} project={data.projects.find(p=>p.id===manage)} close={()=>setManage(undefined)} saved={()=>{void reload();setRefresh(v=>v+1);}} removed={()=>{void reload();}}/>}
     {toolPicker&&<ToolPicker snapshot={data} close={()=>setToolPicker(false)} saved={()=>void reload()}/>}
+    {guide&&<Help snapshot={data} selected={selected} close={()=>setGuide(false)} shortcuts={()=>setHelp(true)}/>}
     {help&&<ShortcutHelp close={()=>setHelp(false)} enabled={shortcutsEnabled} setEnabled={setShortcutsEnabled}/>}
   </div>;
 }
