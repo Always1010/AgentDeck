@@ -133,6 +133,22 @@ describe('HTML response injection', () => {
 });
 
 describe('bridge runtime', () => {
+  test('a trusted parent can probe a new session while other sources and stale config remain rejected', () => {
+    const b = browser();
+    const data = { marker: BRIDGE_MARKER, version: BRIDGE_VERSION, type: 'probe', session: '' };
+    const original = b.sent.length;
+    b.dispatch('message', { source: b.parent, origin: 'https://elsewhere.example', data });
+    b.dispatch('message', { source: {}, origin: mainOrigin, data });
+    expect(b.sent.length).toBe(original);
+    b.dispatch('message', { source: b.parent, origin: mainOrigin, data });
+    expect(b.sent.length).toBe(original + 1);
+    expect(b.sent.at(-1)).toMatchObject({ type: 'ready', session: 'session-one' });
+    expect(b.key('f').prevented).toBe(false);
+    b.configure(fullConfig, { data: { ...data, type: 'config', session: 'old-document', config: fullConfig } });
+    expect(b.key('f').prevented).toBe(false);
+    b.configure(); expect(b.key('f').prevented).toBe(true);
+  });
+
   test('requires parent source, origin, current session and explicit configuration', () => {
     const b = browser(); expect(b.sent[0].type).toBe('ready'); expect(b.key('f').prevented).toBe(false);
     b.configure(fullConfig, { origin: 'https://elsewhere.example' }); expect(b.key('f').prevented).toBe(false);

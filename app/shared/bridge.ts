@@ -4,7 +4,7 @@ export type BridgeAction = 'back' | 'forward' | 'sidebar' | 'immersive' | 'searc
 export type BridgeConfig = { mode: 'web' | 'workbench'; singles: boolean; navigation: boolean; escape: boolean; active: boolean };
 type Envelope = { marker: typeof BRIDGE_MARKER; version: typeof BRIDGE_VERSION; session: string };
 export type BridgeMessage = Envelope & (
-  { type: 'ready' | 'focus' } |
+  { type: 'ready' | 'focus' | 'probe' } |
   { type: 'action'; action: BridgeAction } |
   { type: 'scroll' | 'restore-scroll'; x: number; y: number } |
   { type: 'config'; config: BridgeConfig }
