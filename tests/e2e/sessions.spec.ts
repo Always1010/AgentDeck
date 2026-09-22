@@ -69,7 +69,7 @@ test('reload restores mixed layout, proportions, pinned tabs, local history, scr
   await page.mouse.up();
   const ratio = await divider.getAttribute('aria-valuenow');
   await pane(page, 0).locator('.viewer:not([hidden]) .reader').evaluate(element => { element.scrollTop = 480; });
-  await pane(page, 1).getByRole('tab').click();
+  await pane(page, 1).getByRole('tab', { name: 'c.md', exact: true }).click();
   await page.keyboard.press('x');
   await waitSaved(page, state => state.workspace.maximized === 1 && Object.keys(state.workspace.panes).length === 3 && Object.values(state.positions).some(position => position.y === 480));
   const original = (await saved(page))!.snapshot;
@@ -82,8 +82,10 @@ test('reload restores mixed layout, proportions, pinned tabs, local history, scr
   await page.getByRole('button', { name: '恢复分屏', exact: true }).click();
   await expect(pane(page, 0).getByRole('tab')).toHaveText(['a.md', 'b.md']);
   await expect(pane(page, 0).locator('.page-tab.temporary')).toHaveCount(0);
-  await expect(pane(page, 1).getByRole('tab')).toHaveText('c.md');
-  await expect(pane(page, 2).getByRole('tab')).toHaveText('d.md');
+  await expect(pane(page, 1).getByRole('tab')).toHaveText(['b.md', 'c.md']);
+  await expect(pane(page, 2).getByRole('tab')).toHaveText(['c.md', 'd.md']);
+  expect(original.workspace.histories[1].entries.map(id => id.split(':').at(-1))).toEqual(['b.md', 'c.md']);
+  expect(original.workspace.histories[2].entries.map(id => id.split(':').at(-1))).toEqual(['c.md', 'd.md']);
   await expect(divider).toHaveAttribute('aria-valuenow', ratio!);
   await expect.poll(() => pane(page, 0).locator('.viewer:not([hidden]) .reader').evaluate(element => element.scrollTop)).toBe(480);
   await expect(file(page, 'a.md')).toBeVisible();
@@ -120,7 +122,7 @@ test('duplicating an active scene creates a durable independent copy and each re
   expect(sessionId(duplicate)).toBe(secondId);
   await expect(duplicate.locator('.reading-pane')).toHaveCount(2);
   await expect(pane(duplicate, 0).getByRole('tab')).toHaveText(['a.md', 'c.md']);
-  await expect(pane(duplicate, 1).getByRole('tab')).toHaveText('d.md');
+  await expect(pane(duplicate, 1).getByRole('tab')).toHaveText(['c.md', 'd.md']);
 });
 
 test('a closed browser page restores its original scene URL instead of creating another copy', async ({ page, context }) => {
@@ -135,7 +137,7 @@ test('a closed browser page restores its original scene URL instead of creating 
   await expect(reopened.locator('.reading-pane')).toHaveCount(2);
   expect(sessionId(reopened)).toBe(id);
   await expect(pane(reopened, 0).getByRole('tab')).toHaveText('a.md');
-  await expect(pane(reopened, 1).getByRole('tab')).toHaveText('b.md');
+  await expect(pane(reopened, 1).getByRole('tab')).toHaveText(['a.md', 'b.md']);
 });
 
 test('opening the home page copies the last foreground scene, ignoring later background scroll saves', async ({ page, context }) => {
@@ -268,13 +270,13 @@ test('a real browser relaunch with the same profile restores the scene, proporti
     expect(sessionId(restored)).toBe(id);
     await expect(pane(restored, 0).getByRole('tab')).toHaveText('b.md');
     await expect(pane(restored, 0).locator('.page-tab.temporary')).toHaveCount(0);
-    await expect(pane(restored, 1).getByRole('tab')).toHaveText('c.md');
+    await expect(pane(restored, 1).getByRole('tab')).toHaveText(['b.md', 'c.md']);
     await expect(restored.getByRole('separator', { name: '调整阅读区比例' })).toHaveAttribute('aria-valuenow', ratio!);
     await pane(restored, 0).getByRole('tab').click();
     await restored.keyboard.press('Alt+ArrowLeft');
     await expect(pane(restored, 0).getByRole('tab')).toHaveText(['b.md', 'a.md']);
     await expect(pane(restored, 0).getByRole('tab', { name: 'a.md', exact: true })).toHaveAttribute('aria-selected', 'true');
-    await expect(pane(restored, 1).getByRole('tab')).toHaveText('c.md');
+    await expect(pane(restored, 1).getByRole('tab')).toHaveText(['b.md', 'c.md']);
   } finally {
     await browser?.close();
     await fs.rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 150 });
