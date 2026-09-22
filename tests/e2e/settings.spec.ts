@@ -41,6 +41,12 @@ test('settings is a persistent page and preserves the mounted report and theme',
   await expect(page.getByLabel('界面主题')).toHaveValue('dark');
   await page.goto('/#settings');
   await expect(page.getByLabel('HTML 默认打开方式')).toHaveValue('browser');
+  await page.screenshot({ path: 'test-results/settings-desktop.png' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await settings.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
+  await settings.getByRole('button', { name: '快捷键', exact: true }).click();
+  await expect(settings.getByLabel('HTML 内快捷键处理')).toBeVisible();
+  await page.screenshot({ path: 'test-results/settings-mobile.png' });
 });
 
 test('HTML preference opens the raw page once and explicit internal opening overrides it', async ({ page, context }) => {
