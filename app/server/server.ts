@@ -12,6 +12,7 @@ import { describeFile, isTextFile, legacyIds } from './files.js';
 import { parseFileReference } from '../shared/model.js';
 import { readLegacyReferences } from './legacy-references.js';
 import { listTools } from './tools.js';
+import { bridgeScriptPath, htmlBridgeScript, injectHtmlBridge } from './html-bridge.js';
 import type { ServerResponse } from 'node:http';
 import { projectInput, mountInput, mountPatch, preferenceSchema, overrideSchema, previewPath, type Mount, type RegistryData, type TreeItem } from '../shared/model.js';
 
@@ -155,13 +156,20 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     if(file.stat.isDirectory()) throw new AppError('INVALID_PATH','不能下载目录');
     return reply.header('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(path.basename(file.real))}`).type('application/octet-stream').send(createReadStream(file.real));
   });
+  preview.get(bridgeScriptPath, async (_req, reply) => reply.type('application/javascript; charset=utf-8').send(htmlBridgeScript(mainOrigin)));
   preview.route<{ Params: { id: string; '*': string } }>({ method: ['GET', 'HEAD'], url: '/m/:id/*', handler: async (req, reply) => {
     const m = mount(req.params.id); let rel = req.params['*']; let file = await policy.resolve(m, rel);
     if (file.stat.isDirectory()) {
       if (!req.url.split('?')[0].endsWith('/')) return reply.redirect(req.url.split('?')[0] + '/', 302);
       rel = rel ? `${rel.replace(/\/$/,'')}/index.html` : 'index.html'; file = await policy.resolve(m, rel);
     }
-    reply.type(mime[path.extname(file.real).toLowerCase()]).header('Content-Length', file.stat.size);
+    const extension = path.extname(file.real).toLowerCase();
+    if (extension === '.html' || extension === '.htm') {
+      const html = Buffer.from(injectHtmlBridge(await fs.readFile(file.real, 'utf8')));
+      reply.type('text/html; charset=utf-8').header('Content-Length', html.length);
+      return req.method === 'HEAD' ? reply.send() : reply.send(html);
+    }
+    reply.type(mime[extension]).header('Content-Length', file.stat.size);
     if(req.method==='HEAD')return reply.send();
     return reply.send(createReadStream(file.real));
   } });
