@@ -27,6 +27,19 @@ test('closing active returns to the last used remaining page, closing background
   expect(pagesReducer(state, { type: 'close', id: 'c' })).toEqual(initialPages());
 });
 
+test('opening from a kept page preserves a background preview and replaces only the active preview', () => {
+  let state = initialPages('fixed');
+  state = pagesReducer(state, { type: 'open', id: 'background' });
+  state = pagesReducer(state, { type: 'open', id: 'fixed' });
+  state = pagesReducer(state, { type: 'open', id: 'new' });
+  expect(state.items.map(p => p.id)).toEqual(['fixed', 'background', 'new']);
+  state = pagesReducer(state, { type: 'open', id: 'replacement' });
+  expect(state.items.map(p => p.id)).toEqual(['fixed', 'background', 'replacement']);
+  state = pagesReducer(state, { type: 'open', id: 'background' });
+  expect(state.items).toHaveLength(3);
+  expect(state.active).toBe('background');
+});
+
 test('legacy aliases merge duplicate tabs and preserve kept status and selection', () => {
   let state = initialPages('legacy');
   state = pagesReducer(state, { type: 'open', id: 'file:mount:report.html' });
