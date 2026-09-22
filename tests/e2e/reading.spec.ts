@@ -104,10 +104,10 @@ test('Alt history restores replaced text previews, isolates panes and truncates 
 
 test('HTML focus routes shortcuts to its own pane, protects typing and supports file overrides', async ({ page }) => {
   await page.getByRole('button', { name: '设置', exact: true }).click();
-  const settings = page.getByRole('main', { name: '设置页面' });
+  const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings.getByRole('button', { name: '快捷键', exact: true }).click();
   await settings.getByLabel('HTML 内快捷键处理').selectOption('workbench');
-  await settings.getByRole('button', { name: '返回工作台' }).click();
+  await settings.getByRole('button', { name: '关闭设置' }).click();
   await page.getByRole('treeitem', { name: 'a.html', exact: true }).dblclick();
   const first = pane(page, 0), second = pane(page, 1);
   await expect(first.locator('.bridge-state')).toHaveText('工作台快捷键优先');
@@ -154,9 +154,9 @@ test('HTML history restores document scroll and failed bridge exposes unavailabl
   await first.getByRole('button', { name: '后退', exact: true }).click();
   await expect.poll(async()=>page.frames().find(f=>f.url().endsWith('/a.html'))?.evaluate(()=>window.scrollY)).toBe(500);
   await page.getByRole('button', { name: '设置', exact: true }).click();
-  await page.getByRole('main', { name: '设置页面' }).getByRole('button', { name: '快捷键', exact: true }).click();
+  await page.getByRole('dialog', { name: '设置', exact: true }).getByRole('button', { name: '快捷键', exact: true }).click();
   await page.getByLabel('HTML 内快捷键处理').selectOption('workbench');
-  await page.getByRole('button', { name: '返回工作台' }).click();
+  await page.getByRole('button', { name: '关闭设置' }).click();
   await page.route('**/__agentdeck/bridge.js',route=>route.abort());
   await first.getByRole('button', { name: '刷新', exact: true }).click();
   await expect(first.locator('.bridge-state')).toContainText('当前页面未接管快捷键');
