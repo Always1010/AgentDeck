@@ -18,6 +18,8 @@ import { Settings, isHtmlOpening, type HtmlOpening } from './Settings.js';
 import { isHtmlKeyMode, type HtmlKeyMode } from './useHtmlBridge.js';
 import type { BridgeAction } from '../shared/bridge.js';
 import { FileOpenMenu } from './FileOpenMenu.js';
+import { FileTypeFilterControl } from './FileTypeFilter.js';
+import { defaultFileTypeFilter, isFileTypeFilter, type FileTypeFilter } from './fileExtensions.js';
 import './style.css';
 import './theme.css';
 const empty:Snapshot={projects:[],mounts:[],revision:0};
@@ -41,6 +43,7 @@ export function App() {
   const selected=pages.active;
   const [openedExpanded,setOpenedExpanded]=usePreference('pages.expanded',true,isBoolean);
   const [favorites,setFavorites]=usePreference<string[]>('favorites',[],(v):v is string[]=>Array.isArray(v)&&v.every(x=>typeof x==='string'));
+  const [fileTypeFilter,setFileTypeFilter]=usePreference<FileTypeFilter>('explorer.file-types',defaultFileTypeFilter,isFileTypeFilter);
   const [aliases,setAliases]=usePreference<Record<string,string>>('file.aliases',{},(v):v is Record<string,string>=>!!v&&typeof v==='object'&&!Array.isArray(v)&&Object.values(v).every(x=>typeof x==='string'));
   const favoritesRef=useRef(favorites);favoritesRef.current=favorites;
   const aliasesRef=useRef(aliases);aliasesRef.current=aliases;
@@ -164,7 +167,7 @@ export function App() {
     </div></header>
     <aside className="explorer" aria-label="文件资源浏览器" aria-hidden={hidden}>
       <OpenPages pages={pages.items} active={selected} snapshot={data} open={open} keep={keepPage} close={closePage} expanded={openedExpanded} toggle={()=>setOpenedExpanded(!openedExpanded)}/>
-      <div className="explorer-header"><nav aria-label="浏览视图"><button className={view==='files'?'active':''} onClick={()=>{setView('files');setQuery('');}}>文件</button><button className={view==='favorites'?'active':''} onClick={()=>{setView('favorites');setQuery('');}}>收藏</button><button className={view==='tools'?'active':''} onClick={()=>{setView('tools');setQuery('');}}>工具</button></nav><div className="explorer-actions"><button aria-label={view==='tools'?'添加工具':'添加项目'} title={view==='tools'?'添加 HTML 工具':'添加项目 / 挂载目录'} onClick={()=>view==='tools'?setToolPicker(true):setManage('new')}><Icon name="plus"/></button><button aria-label="刷新目录" title="刷新已展开目录" onClick={()=>{void reload();setRefresh(v=>v+1);}}>↻</button></div></div>
+      <div className="explorer-header"><nav aria-label="浏览视图"><button className={view==='files'?'active':''} onClick={()=>{setView('files');setQuery('');}}>文件</button><button className={view==='favorites'?'active':''} onClick={()=>{setView('favorites');setQuery('');}}>收藏</button><button className={view==='tools'?'active':''} onClick={()=>{setView('tools');setQuery('');}}>工具</button></nav><div className="explorer-actions">{view==='files'&&<FileTypeFilterControl value={fileTypeFilter} onChange={setFileTypeFilter}/>}<button aria-label={view==='tools'?'添加工具':'添加项目'} title={view==='tools'?'添加 HTML 工具':'添加项目 / 挂载目录'} onClick={()=>view==='tools'?setToolPicker(true):setManage('new')}><Icon name="plus"/></button><button aria-label="刷新目录" title="刷新已展开目录" onClick={()=>{void reload();setRefresh(v=>v+1);}}>↻</button></div></div>
       <div className="explorer-search"><input ref={searchRef} aria-label="筛选文件" type="search" placeholder={view==='tools'?'筛选工具':view==='favorites'?'筛选收藏':'筛选已加载文件…'} value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.nativeEvent.isComposing)return;if(e.key==='ArrowDown'||e.key==='Enter'){const first=Array.from(document.querySelectorAll<HTMLButtonElement>('.explorer-scroll .node-main:not(.folder)')).find(el=>el.getClientRects().length);if(first){e.preventDefault();if(e.key==='Enter')first.click();else first.focus();}}}}/></div>
       <div className="explorer-scroll" role="tree" aria-label={view==='files'?'目录与文件':view==='tools'?'常用工具':'收藏文件'} onKeyDown={e=>{
         if(e.nativeEvent.isComposing||e.ctrlKey||e.altKey||e.metaKey||!['ArrowUp','ArrowDown'].includes(e.key))return;
@@ -175,7 +178,7 @@ export function App() {
           const mounts=data.mounts.filter(m=>m.projectId===project.id);
           return <div className="project-group" key={project.id}>
             {mounts.length!==1&&<div className="project-heading"><span>{project.name}</span><button aria-label={`管理项目：${project.name}`} onClick={()=>setManage(project.id)}>⋯</button></div>}
-            {mounts.map(m=><Tree key={m.id} mount={m} label={mounts.length===1?project.name:m.label} query={query} selected={selected} favorites={favorites} refresh={refresh} open={openFile} internal={open} browserUrl={browserUrl} other={openOther} favorite={favorite} discovered={discovered} manage={mounts.length===1?()=>setManage(project.id):undefined}/>)}
+            {mounts.map(m=><Tree key={m.id} mount={m} label={mounts.length===1?project.name:m.label} query={query} typeFilter={fileTypeFilter} selected={selected} favorites={favorites} refresh={refresh} open={openFile} internal={open} browserUrl={browserUrl} other={openOther} favorite={favorite} discovered={discovered} manage={mounts.length===1?()=>setManage(project.id):undefined}/>)}
             {!mounts.length&&<p className="tree-message">尚未挂载目录</p>}
           </div>;
         })}{!data.projects.length&&<div className="catalog-empty"><p>挂载目录后，展开文件夹开始浏览。</p><button onClick={()=>setManage('new')}>添加项目</button></div>}</div>
@@ -183,7 +186,7 @@ export function App() {
           const mount=data.mounts.find(m=>m.id===ref?.mountId);const name=title||ref?.relativePath.split('/').pop()||'旧收藏（展开原目录后恢复）';
           return <div className={`file-row ${id===selected?'selected':''}`} key={id}><button className="node-main" role="treeitem" aria-selected={id===selected} title={ref?`${mount?.label||'挂载不可用'} / ${ref.relativePath}${favoriteErrors[id]?' · '+favoriteErrors[id]:''}`:id} onClick={event=>{if(event.detail<=1)openFile(id);}} onDoubleClick={()=>openFile(id,true)}>{view==='tools'?<Icon name="tool"/>:<FileIcon name={name}/>}<span className="filename">{name}</span>{ref&&(!mount||!mount.enabled||favoriteErrors[id])&&<span className="node-status">不可用</span>}</button>{/\.html?$/i.test(ref?.relativePath||'')&&<FileOpenMenu name={name} url={browserUrl(id)} internal={()=>open(id)} other={()=>openOther(id)}/>}<button className={`row-action ${view==='tools'?'':'starred'}`} aria-label={`${view==='tools'?'移除工具':'取消收藏'}：${name}`} title={view==='tools'?'从工具列表移除，原文件保留':'取消收藏'} onClick={()=>view==='tools'?void changeTool(id,true):favorite(id)}>{view==='tools'?<Icon name="close"/>:'★'}</button></div>;
         })}{!refs.length&&<p className="tree-message">{query?'没有匹配的文件':view==='tools'?'点击上方＋添加 HTML，或在预览的更多菜单中加入工具。':'点击文件旁的星标，收藏常用文件。'}</p>}</>}
-      </div><div className="explorer-footer">{view==='tools'?'常用 HTML 工具 · 原文件只读':view==='favorites'?'常用文件收藏':query?'仅筛选已加载的目录和文件':'按需展开 · 原文件只读'}</div>
+      </div><div className="explorer-footer">{view==='tools'?'常用 HTML 工具 · 原文件只读':view==='favorites'?'常用文件收藏':fileTypeFilter.mode!=='all'?`${fileTypeFilter.mode==='allow'?'白名单':'黑名单'} · ${fileTypeFilter.extensions.length} 种类型${query?' · 名称筛选中':''}`:query?'仅筛选已加载的目录和文件':'按需展开 · 原文件只读'}</div>
     </aside>
     <div className="catalog-resizer" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-valuemin={200} aria-valuemax={440} aria-valuenow={width} tabIndex={hidden?-1:0} onPointerDown={e=>{if(e.button!==0)return;drag.current={x:e.clientX,width};e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(drag.current)resize(drag.current.width+e.clientX-drag.current.x);}} onPointerUp={e=>{drag.current=null;if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);}} onLostPointerCapture={()=>{drag.current=null;}} onKeyDown={e=>{if(e.altKey||e.ctrlKey||e.metaKey||e.shiftKey||e.nativeEvent.isComposing)return;if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();resize(e.key==='Home'?200:e.key==='End'?440:width+(e.key==='ArrowLeft'?-10:10));}}}/>
     <main ref={readingArea} className={`workspace-pages layout-${layout}`} style={{'--split-ratio':`${splitRatio}%`} as CSSProperties}>

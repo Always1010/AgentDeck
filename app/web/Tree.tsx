@@ -2,15 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { fileReference, type Mount, type TreeItem } from '../shared/model.js';
 import { api } from './api.js';
 import { FileOpenMenu } from './FileOpenMenu.js';
+import { fileTypeVisible, type FileTypeFilter } from './fileExtensions.js';
 
 type Listing = { items?: TreeItem[]; error?: string; loading?: boolean };
-type Props = { mount: Mount; label: string; query: string; selected: string; favorites: string[]; refresh: number; open: (id: string, keep?: boolean) => void; internal: (id: string) => void; browserUrl: (id: string) => string | undefined; other?: (id: string) => void; favorite: (id: string) => void; discovered: (mount: Mount, items: TreeItem[]) => void; manage?: () => void };
+type Props = { mount: Mount; label: string; query: string; typeFilter: FileTypeFilter; selected: string; favorites: string[]; refresh: number; open: (id: string, keep?: boolean) => void; internal: (id: string) => void; browserUrl: (id: string) => string | undefined; other?: (id: string) => void; favorite: (id: string) => void; discovered: (mount: Mount, items: TreeItem[]) => void; manage?: () => void };
 export function FileIcon({name}:{name:string}) {
   const ext = name.split('.').pop()?.toLowerCase();
   const kind = /^(html?|md|markdown|csv)$/.test(ext || '') ? ext : 'file';
   return <span aria-hidden="true" className={`file-icon icon-${kind}`}>{/^html?$/.test(ext || '') ? 'H' : /^(md|markdown)$/.test(ext || '') ? 'M' : ext === 'csv' ? 'C' : '≡'}</span>;
 }
-export function Tree({mount,label,query,selected,favorites,refresh,open,internal,browserUrl,other,favorite,discovered,manage}:Props) {
+export function Tree({mount,label,query,typeFilter,selected,favorites,refresh,open,internal,browserUrl,other,favorite,discovered,manage}:Props) {
   const [expanded,setExpanded] = useState<Set<string>>(new Set());
   const [cache,setCache] = useState<Record<string,Listing>>({});
   const live = useRef({expanded,mount,discovered}); live.current = {expanded,mount,discovered};
@@ -43,10 +44,11 @@ export function Tree({mount,label,query,selected,favorites,refresh,open,internal
     setExpanded(next);
   }
   const term=query.trim().toLowerCase();
-  function matches(item:TreeItem):boolean {return item.name.toLowerCase().includes(term) || item.relativePath.toLowerCase().includes(term) || !!(item.directory && cache[item.relativePath]?.items?.some(matches));}
+  function matches(item:TreeItem):boolean {if(!item.directory&&!fileTypeVisible(item.name,typeFilter))return false;return item.name.toLowerCase().includes(term) || item.relativePath.toLowerCase().includes(term) || !!(item.directory && cache[item.relativePath]?.items?.some(matches));}
   function directory(path:string,name:string,depth:number,root=false) {
     const listing=cache[path];
     const opened=expanded.has(path) || !!(term && listing?.items?.some(matches));
+    const visibleItems=listing?.items?.filter(item=>(item.directory||fileTypeVisible(item.name,typeFilter))&&(!term||matches(item)));
     return <div role="none" key={path}>
       <div className="file-row" style={{paddingLeft:8+depth*14}}>
         <button className="node-main folder" role="treeitem" aria-level={depth+1} aria-expanded={opened} disabled={!mount.enabled} title={root?mount.absolutePath:path} onClick={()=>toggle(path)} onKeyDown={e=>{
@@ -59,7 +61,8 @@ export function Tree({mount,label,query,selected,favorites,refresh,open,internal
         {listing?.error&&<div className="tree-message" role="alert">{listing.error}<button onClick={()=>void load(path)}>重试</button></div>}
         {!listing?.items&&!listing?.error&&<div className="tree-message">正在读取…</div>}
         {listing?.items?.length===0&&<div className="tree-message">空目录</div>}
-        {listing?.items?.filter(item=>!term||matches(item)).map(item=>{
+        {!!listing?.items?.length&&!visibleItems?.length&&<div className="tree-message">没有符合筛选条件的文件</div>}
+        {visibleItems?.map(item=>{
           if(item.directory)return directory(item.relativePath,item.name,depth+1);
           const id=fileReference(mount.id,item.relativePath);const starred=favorites.includes(id);
           return <div className={`file-row ${selected===id?'selected':''}`} role="none" key={item.relativePath} style={{paddingLeft:8+(depth+1)*14}}>
