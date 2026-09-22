@@ -26,7 +26,7 @@ test.beforeEach(async ({ page }) => {
   await page.getByRole('treeitem', { name: '阅读验证', exact: true }).click();
 });
 
-test('two panes retain same-file instances through orientation, resize and single view', async ({ page }) => {
+test('mixed panes retain same-file instances through repeated splits, mouse resize and maximize', async ({ page }) => {
   await page.getByRole('treeitem', { name: 'a.html', exact: true }).dblclick();
   const left = pane(page, 0), right = pane(page, 1);
   await left.frameLocator('iframe').locator('#draft').fill('左侧输入');
@@ -38,30 +38,35 @@ test('two panes retain same-file instances through orientation, resize and singl
   await expect(page.locator('[role=tab][id]')).toHaveCount(2);
   const ids = await page.locator('[role=tab][id]').evaluateAll(elements => elements.map(el => el.id));
   expect(new Set(ids).size).toBe(2);
-  await page.getByLabel('阅读布局', { exact: true }).selectOption('rows');
-  const upper = await left.boundingBox(), lower = await right.boundingBox();
-  expect(lower!.y).toBeGreaterThan(upper!.y + upper!.height);
+  await right.getByRole('tab').click();
+  await page.keyboard.press('o');
+  const third = pane(page, 2);
+  await expect(third).toBeVisible();
+  const upper = await right.boundingBox(), lower = await third.boundingBox();
+  expect(lower!.y).toBeGreaterThan(upper!.y + upper!.height - 1);
   await expect(left.frameLocator('iframe').locator('#draft')).toHaveValue('左侧输入');
   await expect(right.frameLocator('iframe').locator('#draft')).toHaveValue('右侧输入');
   expect(await original.evaluate(() => (window as unknown as { identity: string }).identity)).toBe('original');
-  const divider = page.getByRole('separator', { name: '调整阅读区比例' });
-  await divider.focus(); await page.keyboard.press('ArrowUp');
-  await expect(divider).toHaveAttribute('aria-valuenow', '48');
+  const divider = page.getByRole('separator', { name: '调整阅读区比例' }).last();
+  const handle = await divider.boundingBox();
+  await page.mouse.move(handle!.x + handle!.width / 2, handle!.y + handle!.height / 2);
+  await page.mouse.down(); await page.mouse.move(handle!.x + handle!.width / 2, handle!.y - 45); await page.mouse.up();
+  const ratio = await divider.getAttribute('aria-valuenow');
+  expect(Number(ratio)).toBeLessThan(50);
   await right.getByRole('tab').click();
-  await page.getByLabel('阅读布局', { exact: true }).selectOption('single');
-  await expect(left).toBeHidden(); await expect(right).toBeVisible();
-  await page.getByLabel('阅读布局', { exact: true }).selectOption('columns');
+  await page.keyboard.press('x');
+  await expect(left).toBeHidden(); await expect(right).toBeVisible(); await expect(third).toBeHidden();
+  await page.keyboard.press('x');
   await expect(left.frameLocator('iframe').locator('#draft')).toHaveValue('左侧输入');
   await expect(right.frameLocator('iframe').locator('#draft')).toHaveValue('右侧输入');
   await page.setViewportSize({ width: 900, height: 1440 });
-  await page.getByLabel('阅读布局', { exact: true }).selectOption('rows');
-  await expect(divider).toHaveAttribute('aria-valuenow', '48');
+  await expect(divider).toHaveAttribute('aria-valuenow', ratio!);
   await page.screenshot({ path: 'test-results/reading-portrait.png' });
 });
 
 test('new files replace only the selected pane temporary page', async ({ page }) => {
   await page.getByRole('treeitem', { name: 'a.md', exact: true }).click();
-  await page.getByLabel('阅读布局', { exact: true }).selectOption('columns');
+  await page.getByRole('button', { name: '左右分屏', exact: true }).click();
   await pane(page, 1).getByRole('button', { name: '选择文件', exact: true }).click();
   await page.getByRole('treeitem', { name: 'b.md', exact: true }).click();
   await page.getByRole('treeitem', { name: 'c.md', exact: true }).click();
@@ -72,6 +77,57 @@ test('new files replace only the selected pane temporary page', async ({ page })
   await page.getByRole('treeitem', { name: 'd.md', exact: true }).dblclick();
   await expect(pane(page, 1).locator('.markdown h1')).toHaveText('c');
   await expect(pane(page, 0).locator('.page-tab.temporary')).toHaveCount(0);
+});
+
+test('W closes only once per press and last-tab policy keeps or removes the empty region', async ({ page }) => {
+  await page.getByRole('treeitem', { name: 'a.md', exact: true }).dblclick();
+  await page.getByRole('treeitem', { name: 'b.md', exact: true }).dblclick();
+  await expect(pane(page, 0).getByRole('tab')).toHaveCount(2);
+  await page.keyboard.down('w');
+  await expect(pane(page, 0).getByRole('tab')).toHaveCount(1);
+  await page.keyboard.down('w');
+  await expect(pane(page, 0).getByRole('tab')).toHaveCount(1);
+  await page.keyboard.up('w');
+  await page.keyboard.press('e');
+  await expect(pane(page, 1)).toBeVisible();
+  await page.getByRole('treeitem', { name: 'c.md', exact: true }).click();
+  await page.keyboard.press('w');
+  await expect(pane(page, 1)).toBeVisible();
+  await expect(pane(page, 1).getByRole('tab')).toHaveCount(0);
+  await page.keyboard.press('w');
+  await expect(page.locator('[data-pane]')).toHaveCount(2);
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: '设置', exact: true });
+  await settings.getByRole('button', { name: '阅读布局', exact: true }).click();
+  await settings.getByLabel('关闭阅读区最后一个标签后').selectOption('remove');
+  await settings.getByRole('button', { name: '关闭设置' }).click();
+  await page.getByRole('treeitem', { name: 'c.md', exact: true }).click();
+  await page.keyboard.press('w');
+  await expect(pane(page, 1)).toHaveCount(0);
+  await expect(pane(page, 0).getByRole('tab')).toHaveCount(1);
+  await page.keyboard.press('w');
+  await expect(pane(page, 0)).toBeVisible();
+  await expect(pane(page, 0).getByRole('tab')).toHaveCount(0);
+});
+
+test('fixed current tabs open history in a new tab without replacing a background temporary file', async ({ page }) => {
+  const first = pane(page, 0);
+  await page.getByRole('treeitem', { name: 'a.md', exact: true }).dblclick();
+  await page.getByRole('treeitem', { name: 'b.md', exact: true }).click();
+  await first.getByRole('tab', { name: 'a.md', exact: true }).click();
+  await page.getByRole('treeitem', { name: 'c.md', exact: true }).click();
+  await expect(first.getByRole('tab')).toHaveText(['a.md', 'b.md', 'c.md']);
+  await first.getByRole('tab', { name: 'c.md', exact: true }).dblclick();
+  await page.keyboard.press('Alt+ArrowLeft');
+  await expect(first.getByRole('tab', { name: 'a.md', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Alt+ArrowLeft');
+  await expect(first.getByRole('tab', { name: 'b.md', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('treeitem', { name: 'd.md', exact: true }).dblclick();
+  await page.keyboard.press('Alt+ArrowLeft');
+  await expect(first.getByRole('tab')).toHaveCount(4);
+  await expect(first.getByRole('tab', { name: 'c.md', exact: true })).toBeVisible();
+  await expect(first.getByRole('tab', { name: 'd.md', exact: true })).toBeVisible();
+  await expect(first.getByRole('tab', { name: 'b.md', exact: true })).toHaveAttribute('aria-selected', 'true');
 });
 
 test('Alt history restores replaced text previews, isolates panes and truncates forward visits', async ({ page }) => {
@@ -93,7 +149,7 @@ test('Alt history restores replaced text previews, isolates panes and truncates 
   await expect(first.locator('.markdown h1')).toHaveText('b');
   await page.getByRole('treeitem', { name: 'd.md', exact: true }).click();
   await expect(first.getByRole('button', { name: '前进', exact: true })).toBeDisabled();
-  await page.getByLabel('阅读布局', { exact: true }).selectOption('rows');
+  await page.getByRole('button', { name: '上下分屏', exact: true }).click();
   await second.getByRole('button', { name: '选择文件', exact: true }).click();
   await page.getByRole('treeitem', { name: 'a.md', exact: true }).click();
   await page.getByRole('treeitem', { name: 'c.md', exact: true }).click();
@@ -117,11 +173,12 @@ test('HTML focus routes shortcuts to its own pane, protects typing and supports 
   await expect(page.locator('.shell')).toHaveClass(/immersive/);
   expect(await frameA.evaluate(()=>(window as unknown as {pageKeys:number}).pageKeys)).toBe(0);
   await first.frameLocator('iframe').locator('#draft').fill('输入');
-  await page.keyboard.type('fb/?');
-  await expect(first.frameLocator('iframe').locator('#draft')).toHaveValue('输入fb/?');
+  await page.keyboard.type('fb/?oexw');
+  await expect(first.frameLocator('iframe').locator('#draft')).toHaveValue('输入fb/?oexw');
   await page.keyboard.press('Escape');
   await expect(page.locator('.shell')).not.toHaveClass(/immersive/);
-  await page.getByLabel('阅读布局', { exact: true }).selectOption('columns');
+  await first.frameLocator('iframe').locator('body').click({position:{x:60,y:150}});
+  await page.keyboard.press('e');
   await second.getByRole('button', { name: '选择文件', exact: true }).click();
   await page.getByRole('treeitem', { name: 'b.html', exact: true }).click();
   await page.getByRole('treeitem', { name: 'c.html', exact: true }).click();
@@ -140,6 +197,9 @@ test('HTML focus routes shortcuts to its own pane, protects typing and supports 
   await expect(page.locator('.shell')).not.toHaveClass(/immersive/);
   const frameB = page.frames().find(f=>f.url().endsWith('/b.html'))!;
   expect(await frameB.evaluate(()=>(window as unknown as {pageKeys:number}).pageKeys)).toBe(1);
+  await page.keyboard.type('oexw');
+  await expect(page.locator('[data-pane]')).toHaveCount(2);
+  await expect(second.getByRole('tab')).toHaveText('b.html');
 });
 
 test('HTML history restores document scroll and failed bridge exposes unavailable status', async ({ page }) => {
@@ -164,7 +224,7 @@ test('HTML history restores document scroll and failed bridge exposes unavailabl
 
 test('more settings floats without resizing, closes outside and on Escape', async ({ page }) => {
   await page.getByRole('treeitem', { name: 'a.md', exact: true }).click();
-  await page.getByLabel('阅读布局', { exact: true }).selectOption('columns');
+  await page.getByRole('button', { name: '左右分屏', exact: true }).click();
   const first = pane(page, 0), second = pane(page, 1);
   await second.getByRole('button', { name: '选择文件', exact: true }).click();
   await page.getByRole('treeitem', { name: 'b.md', exact: true }).click();
@@ -218,7 +278,7 @@ test('seven icon actions fit one row and overflow from right to left as pane nar
   const draft=first.frameLocator('iframe').locator('#draft');await draft.fill('缩放后保留');
   const frame=page.frames().find(item=>item.url().endsWith('/a.html'))!;
   await frame.evaluate(()=>{(window as unknown as {instance:string}).instance='same';});
-  await page.getByLabel('阅读布局',{exact:true}).selectOption('columns');
+  await page.getByRole('button',{name:'左右分屏',exact:true}).click();
   await page.getByRole('separator',{name:'调整侧栏宽度'}).focus();await page.keyboard.press('End');
   await page.setViewportSize({width:760,height:1000});
   await expect.poll(async()=>(await actionIds()).length).toBeLessThan(5);
@@ -256,7 +316,7 @@ test('document font size persists for Markdown and text while HTML keeps its own
   await settings.getByRole('button',{name:'关闭设置'}).click();
   await page.reload();
   await expect(first.locator('.reader')).toHaveCSS('font-size','24px');
-  await page.getByRole('treeitem',{name:'阅读验证',exact:true}).click();
+  if (!await page.getByRole('treeitem',{name:'a.txt',exact:true}).isVisible()) await page.getByRole('treeitem',{name:'阅读验证',exact:true}).click();
   await page.getByRole('treeitem',{name:'a.txt',exact:true}).click();
   await expect(first.locator('.viewer:not([hidden]) .reader')).toHaveCSS('font-size','24px');
   await expect(first.locator('.viewer:not([hidden]) pre')).toHaveCSS('font-size','24px');
@@ -269,7 +329,8 @@ test('document font size persists for Markdown and text while HTML keeps its own
 test('Alt navigation wins over splitter and folder arrow handling', async ({ page }) => {
   await page.getByRole('treeitem', { name: 'a.md', exact: true }).click();
   await page.getByRole('treeitem', { name: 'b.md', exact: true }).click();
-  await page.getByLabel('阅读布局', { exact: true }).selectOption('columns');
+  await page.getByRole('button', { name: '左右分屏', exact: true }).click();
+  await pane(page, 0).getByRole('tab').click();
   const sidebar = page.getByRole('separator', { name: '调整侧栏宽度' });
   const split = page.getByRole('separator', { name: '调整阅读区比例' });
   const sidebarWidth = await sidebar.getAttribute('aria-valuenow');
@@ -277,7 +338,7 @@ test('Alt navigation wins over splitter and folder arrow handling', async ({ pag
   await sidebar.focus(); await page.keyboard.press('Alt+ArrowLeft');
   await expect(pane(page, 0).locator('.markdown h1')).toHaveText('a');
   await expect(sidebar).toHaveAttribute('aria-valuenow', sidebarWidth!);
-  await split.focus(); await page.keyboard.press('Alt+ArrowRight');
+  await split.click(); await page.keyboard.press('Alt+ArrowRight');
   await expect(pane(page, 0).locator('.markdown h1')).toHaveText('b');
   await expect(split).toHaveAttribute('aria-valuenow', ratio!);
   const folder = page.getByRole('treeitem', { name: '阅读验证', exact: true });

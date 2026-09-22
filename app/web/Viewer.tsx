@@ -82,7 +82,7 @@ export function Viewer({documentFontSize=14,keyboardActive=true,bridgeConfig,bri
     refresh:{label:'刷新',tip:'刷新当前文件',icon:'refresh',disabled:loading,run:()=>void load()},
     favorite:{label:favorite?'取消收藏文件':'收藏文件',tip:favorite?'取消收藏':'收藏文件',icon:'star',pressed:favorite,run:toggleFavorite},
     external:{label:'新标签',menuLabel:'在浏览器新标签页打开',tip:'在浏览器新标签页打开',icon:'external',href:entry&&/^html?$/.test(entry.format)?entry.previewUrl:`/preview?entry=${encodeURIComponent(id)}`},
-    split:{label:'分屏打开',tip:'在另一阅读区打开',icon:'split',disabled:!entry||!other,run:()=>other?.()},
+    split:{label:'分屏打开',tip:'在右侧新分屏打开当前文件',icon:'split',disabled:!entry||!other,run:()=>other?.()},
     source:{label:source?'返回阅读':'查看源码',tip:source?'返回阅读':'查看文件源码',icon:source?'book':'code',disabled:!entry||downloadOnly,run:()=>void toggleSource()},
     copy:{label:'复制原文',tip:'复制文件原文',icon:'copy',disabled:!entry||downloadOnly,run:()=>void copyOriginal()},
   };
