@@ -31,8 +31,7 @@ test('two panes retain same-file instances through orientation, resize and singl
   await left.frameLocator('iframe').locator('#draft').fill('左侧输入');
   const original = page.frames().find(f => f.url().endsWith('/a.html'))!;
   await original.evaluate(() => { (window as unknown as { identity: string }).identity = 'original'; window.scrollTo(0, 400); });
-  await left.getByRole('button', { name: '更多设置' }).click();
-  await left.getByRole('button', { name: '在另一阅读区打开' }).click();
+  await left.getByRole('button', { name: '分屏打开' }).click();
   await right.frameLocator('iframe').locator('#draft').fill('右侧输入');
   await expect(page.getByRole('tabpanel')).toHaveCount(2);
   await expect(page.locator('[role=tab][id]')).toHaveCount(2);
@@ -132,7 +131,7 @@ test('HTML focus routes shortcuts to its own pane, protects typing and supports 
   await expect(second.getByRole('tab')).toHaveText('b.html');
   await expect(first.getByRole('tab')).toHaveText('a.html');
   await second.getByRole('button', { name: '更多设置' }).click();
-  await second.getByLabel('此 HTML 快捷键').selectOption('web');
+  await page.getByLabel('此 HTML 快捷键').selectOption('web');
   await page.keyboard.press('Escape');
   await expect(second.locator('.bridge-state')).toHaveText('网页快捷键优先');
   await second.frameLocator('iframe').locator('body').click({position:{x:60,y:150}});
@@ -162,17 +161,43 @@ test('HTML history restores document scroll and failed bridge exposes unavailabl
   await expect(first.locator('.bridge-state')).toContainText('当前页面未接管快捷键');
 });
 
-test('Escape closes only the current pane settings', async ({ page }) => {
+test('more settings floats without resizing, closes outside and on Escape', async ({ page }) => {
   await page.getByRole('treeitem', { name: 'a.md', exact: true }).click();
   await page.getByLabel('阅读布局', { exact: true }).selectOption('columns');
   const first = pane(page, 0), second = pane(page, 1);
   await second.getByRole('button', { name: '选择文件', exact: true }).click();
   await page.getByRole('treeitem', { name: 'b.md', exact: true }).click();
+  const before=await first.locator('.reader').boundingBox();
   await first.getByRole('button', { name: '更多设置' }).click();
+  await expect(page.locator('[data-viewer-settings]')).toBeVisible();
+  expect((await first.locator('.reader').boundingBox())!.height).toBe(before!.height);
   await second.getByRole('button', { name: '更多设置' }).click();
+  await expect(page.locator('[data-viewer-settings]')).toHaveCount(1);
+  await page.getByRole('button', { name: '更多设置' }).last().focus();
   await page.keyboard.press('Escape');
-  await expect(second.locator('[data-viewer-settings]')).toHaveCount(0);
-  await expect(first.locator('[data-viewer-settings]')).toBeVisible();
+  await expect(page.locator('[data-viewer-settings]')).toHaveCount(0);
+  await first.getByRole('button', { name: '更多设置' }).click();
+  await first.locator('.reader').click();
+  await expect(page.locator('[data-viewer-settings]')).toHaveCount(0);
+});
+
+test('direct source and copy actions leave HTML input intact and close its popover', async ({page,context})=>{
+  await context.grantPermissions(['clipboard-read','clipboard-write']);
+  await page.getByRole('treeitem',{name:'a.html',exact:true}).dblclick();
+  const first=pane(page,0);
+  await first.frameLocator('iframe').locator('#draft').fill('未保存的输入');
+  await first.getByRole('button',{name:'更多设置'}).click();
+  await first.getByRole('button',{name:'查看源码'}).click();
+  await expect(page.locator('[data-viewer-settings]')).toHaveCount(0);
+  await expect(first.locator('.reader pre')).toContainText('<input id="draft">');
+  await first.getByRole('button',{name:'返回阅读'}).click();
+  await expect(first.frameLocator('iframe').locator('#draft')).toHaveValue('未保存的输入');
+  await first.getByRole('button',{name:'复制原文'}).click();
+  expect(await page.evaluate(()=>navigator.clipboard.readText())).toContain('<input id="draft">');
+  await expect(first.locator('.notice')).toHaveCount(0);
+  await first.getByRole('button',{name:'更多设置'}).click();
+  await first.frameLocator('iframe').locator('body').click({position:{x:60,y:150}});
+  await expect(page.locator('[data-viewer-settings]')).toHaveCount(0);
 });
 
 test('Alt navigation wins over splitter and folder arrow handling', async ({ page }) => {
