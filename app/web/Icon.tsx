@@ -1,4 +1,4 @@
-export type IconName = 'sidebar' | 'tool' | 'plus' | 'close' | 'refresh' | 'star' | 'external' | 'more' | 'expand' | 'collapse' | 'save' | 'edit' | 'pause' | 'play' | 'trash' | 'unmount' | 'filter';
+export type IconName = 'sidebar' | 'tool' | 'plus' | 'close' | 'refresh' | 'star' | 'external' | 'more' | 'expand' | 'collapse' | 'save' | 'edit' | 'pause' | 'play' | 'trash' | 'unmount' | 'filter' | 'split' | 'code' | 'book' | 'copy';
 const paths: Record<IconName, string> = {
   sidebar: 'M3 4h18v16H3V4Zm6 0v16',
   tool: 'M14.7 6.3a5 5 0 0 0-6.4 6.4L3 18l3 3 5.3-5.3a5 5 0 0 0 6.4-6.4L14 13l-3-3 3.7-3.7Z',
@@ -17,6 +17,10 @@ const paths: Record<IconName, string> = {
   trash: 'M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7',
   unmount: 'M10 5H4v14h6M14 7l5 5-5 5M8 12h11',
   filter: 'M3 5h18l-7 8v6l-4 2v-8L3 5Z',
+  split: 'M3 4h18v16H3V4Zm9 0v16',
+  code: 'm8 8-4 4 4 4m8-8 4 4-4 4m-3-11-2 18',
+  book: 'M12 6C9 4 6 4 3 5v14c3-1 6-1 9 1m0-14c3-2 6-2 9-1v14c-3-1-6-1-9 1m0-14v14',
+  copy: 'M8 7h12v14H8V7ZM4 17H3V3h13v2',
 };
 export function Icon({ name, filled = false }: { name: IconName; filled?: boolean }) {
   return <svg className="ui-icon" width="16" height="16" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={name === 'more' ? 3.5 : 1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false"><path d={paths[name]} /></svg>;

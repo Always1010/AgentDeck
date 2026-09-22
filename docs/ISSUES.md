@@ -182,3 +182,13 @@
 - 解决方案：复制反馈改为礼貌播报的内联区域，不再占用更新通知的 `status` 角色。
 - 验证：阅读区、千文件场景和文件更新端到端回归共 14 例通过，确认更新提示仍可唯一定位，复制原文功能正常。
 - 相关文件：app/web/Viewer.tsx、tests/e2e/reading.spec.ts、tests/e2e/workbench.spec.ts、tests/e2e/performance.spec.ts。
+
+## AD-019 — 分屏后阅读操作占用第二行且无法按宽度收纳
+
+- 日期：2026-09-22
+- 状态：已解决
+- 现象：刷新等操作在第一行，分屏打开、查看源码和复制原文占用第二行；分屏缩窄后仍保留整行按钮，压缩正文空间，也无法从同一处按顺序找到全部阅读操作。
+- 原因：三个常用操作被单独渲染为文字按钮行，工具栏使用横向滚动处理窄宽度，没有按阅读区实际宽度计算可容纳的图标数。
+- 解决方案：将六项常用操作改为单行图标并固定“更多”；通过 ResizeObserver 按当前工具栏宽度从右向左收纳，浮层中保持原操作顺序。每个图标提供悬浮提示与可访问名称；关闭文档使用标签页上的入口。
+- 验证：浏览器测试覆盖宽屏七图标、窄屏收纳顺序、浮层中的源码切换和复制、提示显示、HTML 输入和实例保留，以及标签关闭。
+- 相关文件：app/web/Viewer.tsx、app/web/Icon.tsx、app/web/App.tsx、app/web/style.css、tests/e2e/reading.spec.ts、tests/e2e/pages.spec.ts、tests/e2e/shortcuts.spec.ts。
