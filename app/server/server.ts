@@ -12,7 +12,7 @@ import { describeFile, isTextFile, legacyIds } from './files.js';
 import { parseFileReference } from '../shared/model.js';
 import { readLegacyReferences } from './legacy-references.js';
 import { listTools } from './tools.js';
-import { bridgeScriptPath, htmlBridgeScript, injectHtmlBridge } from './html-bridge.js';
+import { bridgeScriptPath, htmlBridgeScript, prepareHtmlBridge } from './html-bridge.js';
 import type { ServerResponse } from 'node:http';
 import { projectInput, mountInput, mountPatch, preferenceSchema, overrideSchema, previewPath, type Mount, type RegistryData, type TreeItem } from '../shared/model.js';
 
@@ -165,9 +165,9 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     }
     const extension = path.extname(file.real).toLowerCase();
     if (extension === '.html' || extension === '.htm') {
-      const html = Buffer.from(injectHtmlBridge(await fs.readFile(file.real, 'utf8')));
-      reply.type('text/html; charset=utf-8').header('Content-Length', html.length);
-      return req.method === 'HEAD' ? reply.send() : reply.send(html);
+      const html = await prepareHtmlBridge(file.real, file.stat.size);
+      reply.type(html.contentType).header('Content-Length', html.contentLength);
+      return req.method === 'HEAD' ? reply.send() : reply.send(html.stream());
     }
     reply.type(mime[extension]).header('Content-Length', file.stat.size);
     if(req.method==='HEAD')return reply.send();
