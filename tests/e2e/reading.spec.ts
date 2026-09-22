@@ -174,3 +174,23 @@ test('Escape closes only the current pane settings', async ({ page }) => {
   await expect(second.locator('[data-viewer-settings]')).toHaveCount(0);
   await expect(first.locator('[data-viewer-settings]')).toBeVisible();
 });
+
+test('Alt navigation wins over splitter and folder arrow handling', async ({ page }) => {
+  await page.getByRole('treeitem', { name: 'a.md', exact: true }).click();
+  await page.getByRole('treeitem', { name: 'b.md', exact: true }).click();
+  await page.getByLabel('阅读布局', { exact: true }).selectOption('columns');
+  const sidebar = page.getByRole('separator', { name: '调整侧栏宽度' });
+  const split = page.getByRole('separator', { name: '调整阅读区比例' });
+  const sidebarWidth = await sidebar.getAttribute('aria-valuenow');
+  const ratio = await split.getAttribute('aria-valuenow');
+  await sidebar.focus(); await page.keyboard.press('Alt+ArrowLeft');
+  await expect(pane(page, 0).locator('.markdown h1')).toHaveText('a');
+  await expect(sidebar).toHaveAttribute('aria-valuenow', sidebarWidth!);
+  await split.focus(); await page.keyboard.press('Alt+ArrowRight');
+  await expect(pane(page, 0).locator('.markdown h1')).toHaveText('b');
+  await expect(split).toHaveAttribute('aria-valuenow', ratio!);
+  const folder = page.getByRole('treeitem', { name: '阅读验证', exact: true });
+  await folder.focus(); await page.keyboard.press('Alt+ArrowLeft');
+  await expect(pane(page, 0).locator('.markdown h1')).toHaveText('a');
+  await expect(folder).toHaveAttribute('aria-expanded', 'true');
+});
