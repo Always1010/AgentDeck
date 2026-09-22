@@ -9,9 +9,10 @@ import { api } from './api.js';
 import { isBoolean, usePreference } from './preferences.js';
 import { ShortcutHelp } from './ShortcutHelp.js';
 import { Help } from './Help.js';
-import { pagesReducer, type PageAction } from './pages.js';
+import { type PageAction } from './pages.js';
 import { OpenPages, PageTabs, pageTabId } from './PageTabs.js';
-import { initialWorkspace, workspaceReducer, isLayout, type Layout, type PaneId } from './workspace.js';
+import { initialWorkspace, workspaceReducer, layoutRects, minimumPane, dividerSize, type SplitDirection, type PaneId } from './workspace.js';
+import { ReadingLayout } from './ReadingLayout.js';
 import { ThemePicker } from './Theme.js';
 import { isEditing, restoreFocus, shortcutFor } from './shortcuts.js';
 import { Settings, isHtmlOpening, type HtmlOpening } from './Settings.js';
@@ -29,16 +30,21 @@ export function App() {
   const [workspace,dispatchWorkspace]=useReducer(workspaceReducer,new URLSearchParams(location.search).get('entry')||'',initialWorkspace);
   const pages=workspace.panes[workspace.active];
   const dispatchPages=(action:PageAction,pane:PaneId=workspace.active)=>dispatchWorkspace(action.type==='aliases'?action:{type:'page',pane,action});
-  const [layout,setLayout]=usePreference<Layout>('reading.layout','single',isLayout);
-  const validRatio=(value:unknown):value is number=>typeof value==='number'&&Number.isFinite(value)&&value>=20&&value<=80;
-  const [columnsRatio,setColumnsRatio]=usePreference('reading.columns-ratio',50,validRatio);
-  const [rowsRatio,setRowsRatio]=usePreference('reading.rows-ratio',50,validRatio);
-  const splitRatio=layout==='rows'?rowsRatio:columnsRatio;
-  const readingArea=useRef<HTMLElement>(null);
-  const paneDrag=useRef(false);
-  function resizePane(value:number){const next=Math.max(20,Math.min(80,value));if(layout==='rows')setRowsRatio(next);else setColumnsRatio(next);}
+  const [closeEmpty,setCloseEmpty]=usePreference<'keep'|'remove'>('reading.close-empty','keep',(value):value is 'keep'|'remove'=>value==='keep'||value==='remove');
   function activatePane(pane:PaneId){dispatchWorkspace({type:'activate',pane});}
-  function openOther(id:string){const pane=(1-workspace.active) as PaneId;if(layout==='single')setLayout('columns');dispatchPages({type:'open',id:aliasesRef.current[id]||id,keep:true},pane);activatePane(pane);}
+  function splitPane(direction:SplitDirection,pane:PaneId=workspace.active,file?:string){
+    const area=document.querySelector('.workspace-pages')?.getBoundingClientRect();
+    if(!area)return;
+    const box=layoutRects(workspace.root,{x:0,y:0,width:area.width,height:area.height}).panes[pane];
+    if(!box)return;
+    if((direction==='columns'?box.width<minimumPane.width*2+dividerSize:box.height<minimumPane.height*2+dividerSize)){
+      setError('当前区域空间不足，请先拖动分隔线扩大区域。');return;
+    }
+    const nextId=workspace.nextPane;
+    dispatchWorkspace({type:'split',pane,direction,file:file?aliasesRef.current[file]||file:undefined});
+    requestAnimationFrame(()=>document.querySelector<HTMLElement>(`.reading-pane[data-pane="${nextId}"]`)?.focus({preventScroll:true}));
+  }
+  function openOther(id:string){splitPane('columns',workspace.active,id);}
   useEffect(()=>{function focusFrame(){queueMicrotask(()=>{const pane=document.activeElement?.closest<HTMLElement>('[data-pane]');if(pane)activatePane(Number(pane.dataset.pane) as PaneId);});}window.addEventListener('blur',focusFrame);return()=>window.removeEventListener('blur',focusFrame);},[]);
   const selected=pages.active;
   const [openedExpanded,setOpenedExpanded]=usePreference('pages.expanded',true,isBoolean);
@@ -126,20 +132,24 @@ export function App() {
   }
   function keepPage(id:string,pane:PaneId=workspace.active){dispatchPages({type:'keep',id:aliasesRef.current[id]||id},pane);}
   function closePage(id:string,pane:PaneId=workspace.active){
-    const next=pagesReducer(workspace.panes[pane],{type:'close',id});dispatchPages({type:'close',id},pane);
-    if(!next.items.length)setImmersive(false);
-    requestAnimationFrame(()=>{(document.getElementById(pageTabId(next.active,`pane-${pane}`))||sidebarRef.current)?.focus({preventScroll:true});});
+    if(!id)return;
+    const action={type:'page' as const,pane,action:{type:'close' as const,id},closeEmpty:closeEmpty==='remove'};
+    const next=workspaceReducer(workspace,action);dispatchWorkspace(action);
+    requestAnimationFrame(()=>{const active=next.active;const file=next.panes[active].active;(document.getElementById(pageTabId(file,`pane-${active}`))||document.querySelector<HTMLElement>(`.reading-pane[data-pane="${active}"]`)||sidebarRef.current)?.focus({preventScroll:true});});
   }
-  function closePreview(id:string,pane:PaneId=workspace.active){if(standalone&&workspace.panes.reduce((count,item)=>count+item.items.length,0)===1)location.href='/';else closePage(id,pane);}
+  function closePreview(id:string,pane:PaneId=workspace.active){closePage(id,pane);}
   function toggleSidebar(){const show=!searchActive&&(immersive||collapsed);if(searchActive)finishSearch();if(show&&immersive)setImmersive(false);setCollapsed(!show);restoreFocus(sidebarRef.current);}
   function toggleImmersion(){if(!selected&&!immersive)return;if(searchActive)finishSearch();if(!immersive)immersionRestore.current=document.activeElement as HTMLElement|null;setImmersive(!immersive);restoreFocus(immersive?immersionRestore.current:immersionRef.current,immersionRef.current);}
   useEffect(()=>{const url=new URL(location.href);if(selected)url.searchParams.set('entry',selected);else url.searchParams.delete('entry');history.replaceState(null,'',url);},[selected]);
   function runAction(action:BridgeAction,pane:PaneId=workspace.active){
     if(document.querySelector('[data-workbench-dialog]'))return;
+    if(action==='split-rows'||action==='split-columns'){splitPane(action==='split-rows'?'rows':'columns',pane);return;}
+    if(action==='maximize'){dispatchWorkspace({type:'maximize',pane});return;}
+    if(action==='close-tab'){closePage(workspace.panes[pane]?.active||'',pane);return;}
     if(action==='back'||action==='forward'){dispatchWorkspace({type:'history',pane,direction:action==='back'?-1:1});return;}
     if(action==='escape'){
       if(document.querySelector(`[data-viewer-settings][data-pane="${pane}"]`))return;
-      if(searchActive)finishSearch();else if(immersive)toggleImmersion();return;
+      if(searchActive)finishSearch();else if(workspace.maximized!==null)dispatchWorkspace({type:'maximize',pane:workspace.maximized});else if(immersive)toggleImmersion();return;
     }
     if(action==='sidebar')toggleSidebar();
     if(action==='immersive'&&workspace.panes[pane].active)toggleImmersion();
@@ -148,11 +158,12 @@ export function App() {
   }
   useEffect(()=>{function keydown(e:KeyboardEvent){
     if(document.querySelector('[data-workbench-dialog]'))return;
-    const action=shortcutFor(e,isEditing(e.target),shortcutsEnabled,navigationEnabled);
+    const action=shortcutFor(e,isEditing(e.target,e.composedPath()),shortcutsEnabled,navigationEnabled);
     if(!action)return;
-    if(action==='escape'&&(document.querySelector(`[data-viewer-settings][data-pane="${workspace.active}"]`)||(!searchActive&&!immersive)))return;
+    if(['split-rows','split-columns','maximize','close-tab'].includes(action)&&document.querySelector('[role=menu],[data-viewer-settings]'))return;
+    if(action==='escape'&&(document.querySelector(`[data-viewer-settings][data-pane="${workspace.active}"]`)||(!searchActive&&!immersive&&workspace.maximized===null)))return;
     e.preventDefault();if(!e.repeat)runAction(action);
-  }document.addEventListener('keydown',keydown);return()=>document.removeEventListener('keydown',keydown);},[selected,immersive,collapsed,query,searchActive,shortcutsEnabled,navigationEnabled,workspace.active]);
+  }document.addEventListener('keydown',keydown);return()=>document.removeEventListener('keydown',keydown);},[selected,immersive,collapsed,query,searchActive,shortcutsEnabled,navigationEnabled,workspace,closeEmpty]);
   function resize(value:number){setWidth(Math.max(200,Math.min(440,value)));}
   const hidden=!searchActive&&(immersive||collapsed);
   const refs=(view==='tools'?tools:favorites.map(id=>({id,title:''}))).map(({id,title})=>({id,title,ref:parseFileReference(id)})).filter(({id,title,ref})=>`${title} ${ref?.relativePath||id} ${data.mounts.find(m=>m.id===ref?.mountId)?.label||''}`.toLowerCase().includes(query.trim().toLowerCase()));
@@ -160,7 +171,9 @@ export function App() {
     <header className="workspace-header"><button ref={sidebarRef} className="sidebar-toggle" aria-keyshortcuts={shortcutsEnabled?'b':undefined} title={`${hidden?'展开文件侧栏':'收起文件侧栏'}${shortcutsEnabled?' · B（工作台获得焦点时）':''}`} aria-label={hidden?'展开文件侧栏':'收起文件侧栏'} aria-expanded={!hidden} onClick={toggleSidebar}><Icon name="sidebar"/>{shortcutsEnabled&&<kbd aria-hidden="true">B</kbd>}</button><strong className="brand">AgentDeck</strong><span className="workspace-context">本地文件工作台</span><div className="workspace-actions">
       {searchActive&&<button onClick={()=>finishSearch()}>结束筛选</button>}
       <button ref={immersionRef} className="immersion-toggle" disabled={!selected&&!immersive} aria-label={immersive?'退出沉浸':'沉浸'} aria-pressed={immersive} aria-keyshortcuts={shortcutsEnabled?'f':undefined} title={`${immersive?'退出沉浸':'沉浸阅读'}${shortcutsEnabled?' · F（工作台获得焦点时）':''}`} onClick={toggleImmersion}><Icon name={immersive?'collapse':'expand'}/><span>{immersive?'退出沉浸':'沉浸'}</span>{shortcutsEnabled&&<kbd aria-hidden="true">F</kbd>}</button>
-      <label className="layout-picker"><span className="sr-only">阅读布局</span><select aria-label="阅读布局" value={layout} onChange={e=>setLayout(e.target.value as Layout)}><option value="single">单屏</option><option value="columns">左右分屏</option><option value="rows">上下分屏</option></select></label>
+      <button aria-label="上下分屏" title="上下分屏 · O" onClick={()=>splitPane('rows')}>上下分屏</button>
+      <button aria-label="左右分屏" title="左右分屏 · E" onClick={()=>splitPane('columns')}>左右分屏</button>
+      <button aria-label={workspace.maximized===null?'最大化当前阅读区':'恢复分屏'} title="最大化 / 恢复 · X" disabled={Object.keys(workspace.panes).length===1} onClick={()=>dispatchWorkspace({type:'maximize',pane:workspace.active})}>{workspace.maximized===null?'最大化':'恢复分屏'}</button>
       <ThemePicker/>
       <button aria-label="设置" onClick={()=>setSettingsPage(true)}>设置</button>
       <button aria-label="使用帮助" onClick={()=>setGuide(true)}>使用帮助</button>
@@ -190,21 +203,20 @@ export function App() {
       </div><div className="explorer-footer">{view==='tools'?'常用 HTML 工具 · 原文件只读':view==='favorites'?'常用文件收藏':fileTypeFilter.mode!=='all'?`${fileTypeFilter.mode==='allow'?'白名单':'黑名单'} · ${fileTypeFilter.extensions.length} 种类型${query?' · 名称筛选中':''}`:query?'仅筛选已加载的目录和文件':'按需展开 · 原文件只读'}</div>
     </aside>
     <div className="catalog-resizer" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-valuemin={200} aria-valuemax={440} aria-valuenow={width} tabIndex={hidden?-1:0} onPointerDown={e=>{if(e.button!==0)return;drag.current={x:e.clientX,width};e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(drag.current)resize(drag.current.width+e.clientX-drag.current.x);}} onPointerUp={e=>{drag.current=null;if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);}} onLostPointerCapture={()=>{drag.current=null;}} onKeyDown={e=>{if(e.altKey||e.ctrlKey||e.metaKey||e.shiftKey||e.nativeEvent.isComposing)return;if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();resize(e.key==='Home'?200:e.key==='End'?440:width+(e.key==='ArrowLeft'?-10:10));}}}/>
-    <main ref={readingArea} className={`workspace-pages layout-${layout}`} style={{'--split-ratio':`${splitRatio}%`} as CSSProperties}>
-      {workspace.panes.map((pane,index)=>{
-        const paneId=index as PaneId;const visible=layout!=='single'||workspace.active===paneId;const scope=`pane-${paneId}`;const history=workspace.histories[paneId];
-        return <section key={paneId} className={`reading-pane ${workspace.active===paneId?'active-pane':''}`} data-pane={paneId} aria-label={`阅读区 ${paneId+1}`} hidden={!visible} inert={!visible} onPointerDownCapture={()=>activatePane(paneId)} onFocusCapture={()=>activatePane(paneId)}>
+    <ReadingLayout workspace={workspace} resize={(id,ratio)=>dispatchWorkspace({type:'resize',id,ratio})}>
+      {(paneId,visible,style)=>{
+        const pane=workspace.panes[paneId];const scope=`pane-${paneId}`;const history=workspace.histories[paneId];
+        return <section key={paneId} tabIndex={-1} style={style} className={`reading-pane ${workspace.active===paneId?'active-pane':''}`} data-pane={paneId} aria-label={`阅读区 ${paneId+1}`} hidden={!visible} inert={!visible} onPointerDownCapture={()=>activatePane(paneId)} onFocusCapture={()=>activatePane(paneId)}>
           <div className="pane-navigation"><span>阅读区 {paneId+1}</span><button aria-label="后退" title="上一个文件 · Alt＋←" disabled={history.index<=0} onClick={()=>dispatchWorkspace({type:'history',pane:paneId,direction:-1})}>←</button><button aria-label="前进" title="下一个文件 · Alt＋→" disabled={history.index>=history.entries.length-1} onClick={()=>dispatchWorkspace({type:'history',pane:paneId,direction:1})}>→</button></div>
           {!!pane.items.length&&<PageTabs scope={scope} pages={pane.items} active={pane.active} snapshot={data} open={id=>open(id,false,paneId)} keep={id=>keepPage(id,paneId)} close={id=>closePreview(id,paneId)}/>}
-          {pane.items.length?pane.items.map(page=><Viewer documentFontSize={documentFontSize} keyboardActive={workspace.active===paneId} bridgeConfig={{mode:htmlKeys,singles:shortcutsEnabled,navigation:navigationEnabled,escape:immersive||searchActive,active:!settingsPage&&!help&&!guide&&!manage&&!toolPicker}} bridgeAction={action=>runAction(action,paneId)} focused={()=>activatePane(paneId)} initialScroll={positions.current.get(`${paneId}:${page.id}`)} positionChanged={position=>positions.current.set(`${paneId}:${page.id}`,position)} scope={scope} key={page.id} id={page.id} active={visible&&page.id===pane.active} titleChanged={title=>dispatchPages({type:'title',id:page.id,title},paneId)} tool={tools.some(t=>t.id===page.id)} toggleTool={()=>void changeTool(page.id,tools.some(t=>t.id===page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} navigate={(mountId,path)=>{activatePane(paneId);openFile(fileReference(mountId,path),false,paneId);}} other={()=>openOther(page.id)}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>{layout==='single'?'打开报告，专注阅读。':'选择文件，开始对照。'}</h2><p>点击此阅读区，再从侧栏选择文件。双击文件保留标签。</p>{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button onClick={()=>{activatePane(paneId);setCollapsed(false);}}>选择文件</button><button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
+          {pane.items.length?pane.items.map(page=><Viewer documentFontSize={documentFontSize} keyboardActive={workspace.active===paneId} bridgeConfig={{mode:htmlKeys,singles:shortcutsEnabled,navigation:navigationEnabled,escape:immersive||searchActive||workspace.maximized!==null,active:!settingsPage&&!help&&!guide&&!manage&&!toolPicker}} bridgeAction={action=>runAction(action,paneId)} focused={()=>activatePane(paneId)} initialScroll={positions.current.get(`${paneId}:${page.id}`)} positionChanged={position=>positions.current.set(`${paneId}:${page.id}`,position)} scope={scope} key={page.id} id={page.id} active={visible&&page.id===pane.active} titleChanged={title=>dispatchPages({type:'title',id:page.id,title},paneId)} tool={tools.some(t=>t.id===page.id)} toggleTool={()=>void changeTool(page.id,tools.some(t=>t.id===page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} navigate={(mountId,path)=>{activatePane(paneId);openFile(fileReference(mountId,path),false,paneId);}} other={()=>openOther(page.id)}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>{Object.keys(workspace.panes).length===1?'打开报告，专注阅读。':'选择文件，开始对照。'}</h2><p>点击此阅读区，再从侧栏选择文件。双击文件保留标签。</p>{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button onClick={()=>{activatePane(paneId);setCollapsed(false);}}>选择文件</button><button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
         </section>;
-      })}
-      <div className="reading-resizer" hidden={layout==='single'} role="separator" tabIndex={layout==='single'?-1:0} aria-label="调整阅读区比例" aria-orientation={layout==='rows'?'horizontal':'vertical'} aria-valuemin={20} aria-valuemax={80} aria-valuenow={Math.round(splitRatio)} onPointerDown={e=>{if(e.button!==0)return;paneDrag.current=true;e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(!paneDrag.current)return;const rect=readingArea.current!.getBoundingClientRect();resizePane(layout==='rows'?(e.clientY-rect.top)/rect.height*100:(e.clientX-rect.left)/rect.width*100);}} onPointerUp={e=>{paneDrag.current=false;if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);}} onLostPointerCapture={()=>{paneDrag.current=false;}} onDoubleClick={()=>resizePane(50)} onKeyDown={e=>{if(e.altKey||e.ctrlKey||e.metaKey||e.shiftKey||e.nativeEvent.isComposing)return;if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(e.key)){e.preventDefault();resizePane(e.key==='Home'?20:e.key==='End'?80:splitRatio+(['ArrowLeft','ArrowUp'].includes(e.key)?-2:2));}}}/>
-    </main>
+      }}
+    </ReadingLayout>
     {error&&<div className="toast" role="alert">{error}<button onClick={()=>setError('')}>关闭</button></div>}
     {manage&&<Management snapshot={data} project={data.projects.find(p=>p.id===manage)} close={()=>setManage(undefined)} saved={()=>{void reload();setRefresh(v=>v+1);}} removed={()=>{void reload();}}/>}
     {toolPicker&&<ToolPicker snapshot={data} close={()=>setToolPicker(false)} saved={()=>void reload()}/>}
     {guide&&<Help snapshot={data} selected={selected} close={()=>setGuide(false)} shortcuts={()=>setHelp(true)}/>}
     {help&&<ShortcutHelp close={()=>setHelp(false)} enabled={shortcutsEnabled} setEnabled={setShortcutsEnabled}/>}
-  </div>{settingsPage&&<Settings close={closeSettings} htmlOpening={htmlOpening} setHtmlOpening={setHtmlOpening} singles={shortcutsEnabled} setSingles={setShortcutsEnabled} navigation={navigationEnabled} setNavigation={setNavigationEnabled} htmlKeys={htmlKeys} setHtmlKeys={setHtmlKeys} layout={layout} setLayout={setLayout} documentFontSize={documentFontSize} setDocumentFontSize={setDocumentFontSize}/>}</>;
+  </div>{settingsPage&&<Settings close={closeSettings} htmlOpening={htmlOpening} setHtmlOpening={setHtmlOpening} singles={shortcutsEnabled} setSingles={setShortcutsEnabled} navigation={navigationEnabled} setNavigation={setNavigationEnabled} htmlKeys={htmlKeys} setHtmlKeys={setHtmlKeys} closeEmpty={closeEmpty} setCloseEmpty={setCloseEmpty} documentFontSize={documentFontSize} setDocumentFontSize={setDocumentFontSize}/>}</>;
 }
