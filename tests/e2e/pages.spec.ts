@@ -130,7 +130,8 @@ test('same-name reports identify directories and favorites/tools use the same re
 test('narrow layout offers an explicit keep action and a bounded open-pages list', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await openFile(page, 'a.html').click();
-  await page.getByRole('button', { name: '保留页面：a.html', exact: true }).click();
+  await tab(page, 'a.html').dblclick();
+  await expect(page.locator('.page-tab.temporary')).toHaveCount(0);
   await page.getByRole('button', { name: '展开文件侧栏' }).click();
   await openFile(page, 'b.html').click();
   await expect(page.getByRole('tab')).toHaveCount(2);
@@ -138,4 +139,22 @@ test('narrow layout offers an explicit keep action and a bounded open-pages list
   await expect(tab(page, 'a.html')).toHaveAttribute('aria-selected', 'true');
   expect(await page.locator('.workspace-pages').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
   await page.screenshot({ path: 'test-results/pages-mobile.png' });
+});
+
+
+test('temporary tabs use italics without labels or keep buttons and explain retention', async ({ page }) => {
+  await openFile(page, 'a.html').click();
+  const temporary = page.locator('.page-tab.temporary');
+  await expect(temporary.locator('[role=tab]>span')).toHaveCSS('font-style', 'italic');
+  await expect(temporary).not.toContainText('临时');
+  await expect(temporary.getByRole('button', { name: /保留/ })).toHaveCount(0);
+  await tab(page, 'a.html').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: '保留标签页' }).click();
+  await openFile(page, 'b.html').click();
+  await expect(tab(page, 'a.html')).toBeVisible();
+  await tab(page, 'b.html').dblclick();
+  await openFile(page, 'c.html').click();
+  await expect(page.getByRole('tab')).toHaveCount(3);
+  await page.getByRole('button', { name: '快捷键', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('双击文件列表中的文件，或双击标签页');
 });
