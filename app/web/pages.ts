@@ -19,7 +19,7 @@ export function pagesReducer(state: Pages, action: PageAction): Pages {
       if (action.keep && !existing.kept) items = items.map(p => p.id === action.id ? { ...p, kept: true } : p);
     } else {
       const page = { id: action.id, kept: !!action.keep };
-      const temporary = items.findIndex(p => !p.kept);
+      const temporary = items.findIndex(p => p.id === state.active && !p.kept);
       items = temporary >= 0 && !action.keep ? items.map((p, index) => index === temporary ? page : p) : [...items, page];
     }
     const ids = new Set(items.map(p => p.id));
