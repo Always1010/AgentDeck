@@ -4,6 +4,7 @@ export function ShortcutHelp({ close, enabled, setEnabled }: { close: () => void
   return <Dialog label="快捷键" close={close}>
     <header><h2>快捷键</h2><button aria-label="关闭快捷键帮助" onClick={close}>×</button></header>
     <dl className="shortcut-list">
+      <div><dt><kbd>Alt</kbd>＋<kbd>← / →</kbd></dt><dd>当前阅读区的文件后退 / 前进，可在设置中单独关闭</dd></div>
       <div><dt><kbd>B</kbd></dt><dd>展开 / 收起文件侧栏；沉浸中也可展开</dd></div>
       <div><dt><kbd>F</kbd></dt><dd>进入 / 退出沉浸</dd></div>
       <div><dt><kbd>Esc</kbd></dt><dd>关闭最上层弹窗或更多设置；结束搜索；退出沉浸</dd></div>
@@ -14,7 +15,7 @@ export function ShortcutHelp({ close, enabled, setEnabled }: { close: () => void
     </dl>
     <section className="tab-help"><h3>标签页操作</h3><p><em>斜体标题</em>表示临时预览。单击其他尚未打开的文件，会替换当前阅读区的临时标签。</p><p><strong>双击文件列表中的文件，或双击标签页，即可保留标签。</strong>保留后标题恢复正体，打开其他文件不会替换它。也可右键标签选择“保留标签页”。</p><p className="muted">保留标签不等于保存文件，也不代表刷新浏览器后自动恢复。HTML 设置为浏览器新标签页打开时，文件列表遵循该设置。</p></section>
     <label className="inline"><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />启用单键快捷键（B、F、/、?）</label>
-    <p className="muted">输入文字、中文输入法组词时，不触发单键快捷键。浏览器和系统的 Ctrl、Alt、Win / Command 组合键保持原行为。</p>
+    <p className="muted">输入文字、中文输入法组词时，不触发单键快捷键。除启用的 Alt＋左右箭头外，浏览器和系统组合键保持原行为。</p>
     <p className="muted">在内嵌 HTML 报告或工具中操作时，工作台收不到其中的按键。请使用顶部“退出沉浸”按钮，或先点击工作台工具栏。Markdown 和原文阅读区可直接使用。</p>
   </Dialog>;
 }
