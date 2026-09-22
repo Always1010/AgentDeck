@@ -40,10 +40,7 @@ test('single F toggles without reload; iframe typing is untouched; Escape closes
   await expect(input).toHaveValue('保留输入f/?');
   await page.keyboard.press('Escape');
   await expect(page.locator('.shell')).toHaveClass(/immersive/);
-  await page.getByRole('button', { name: '更多设置' }).click();
-  await page.keyboard.press('Escape');
-  await expect(page.locator('[data-viewer-settings]')).toHaveCount(0);
-  await expect(page.locator('.shell')).toHaveClass(/immersive/);
+  await page.getByRole('button', { name: '退出沉浸', exact: true }).focus();
   await page.keyboard.press('?');
   await expect(page.getByRole('dialog', { name: '快捷键', exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
@@ -55,7 +52,7 @@ test('single F toggles without reload; iframe typing is untouched; Escape closes
   await expect(input).toHaveValue('保留输入f/?');
 });
 
-test('immersive search is temporary and list arrows do not replace a live tool', async ({ page }) => {
+test('search exits immersion and list arrows do not replace a live tool', async ({ page }) => {
   await page.getByRole('button', { name: '收起文件侧栏', exact: true }).click();
   await page.getByRole('button', { name: '沉浸', exact: true }).click();
   await page.keyboard.press('/');
@@ -63,7 +60,7 @@ test('immersive search is temporary and list arrows do not replace a live tool',
   await expect(search).toBeFocused(); await expect(page.locator('.explorer')).toBeVisible();
   await search.fill('没有结果');
   await page.keyboard.press('Escape');
-  await expect(page.locator('.shell')).toHaveClass(/immersive/);
+  await expect(page.locator('.shell')).not.toHaveClass(/immersive/);
   await expect(search).toHaveValue('');
   await page.keyboard.press('/');
   await search.fill('.md');
@@ -73,7 +70,7 @@ test('immersive search is temporary and list arrows do not replace a live tool',
   await expect(page.getByRole('treeitem',{name:'b.md',exact:true})).toBeFocused();
   await expect(page.frameLocator('iframe').locator('#draft')).toBeVisible();
   await page.keyboard.press('Enter');
-  await expect(page.locator('.shell')).toHaveClass(/immersive/);
+  await expect(page.locator('.shell')).not.toHaveClass(/immersive/);
   await expect(page.locator('.markdown h1')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('.explorer')).toBeHidden();
@@ -143,8 +140,8 @@ test('Markdown reading position survives keyboard immersion and standalone previ
   const preview = await page.getByRole('link', { name: '新标签', exact: true }).getAttribute('href');
   await page.goto(preview!);
   await expect(page.locator('.shell')).toHaveClass(/immersive/);
-  await page.getByRole('button', { name: '退出沉浸', exact: true }).focus();
-  await page.keyboard.press('Escape');
+  await page.locator('.immersion-exit-zone').hover();
+  await page.getByRole('button', { name: '退出沉浸', exact: true }).click();
   await expect(page.locator('.shell')).not.toHaveClass(/immersive/);
   await expect(page.locator('.markdown h1')).toHaveText('第一篇笔记');
   await page.getByRole('tablist').getByRole('button',{name:'关闭页面：a.md'}).click();

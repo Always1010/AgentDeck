@@ -87,3 +87,14 @@ kbd{font:11px/1.4 Segoe UI,sans-serif;border:1px solid var(--border);border-radi
 .startup-state{padding:32px;color:var(--muted)}.save-warning{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);z-index:110;max-width:90vw;box-shadow:0 4px 20px #0003}.save-warning button{margin-left:12px}.reading-session-row{display:flex;gap:16px;align-items:center;justify-content:space-between;padding:12px 0;border-top:1px solid var(--border)}.reading-session-row>div{min-width:0}.reading-session-row strong{display:block;overflow-wrap:anywhere;font-size:13px}.reading-session-row>a,.reading-session-row>span{flex-shrink:0;font-size:12px}
 
 .pane-navigation .pane-close{display:flex;align-items:center;justify-content:center;margin-left:4px;padding:3px 6px;flex:none}
+
+/* Immersion keeps the live viewer mounted while its surrounding controls disappear. */
+.shell.immersive{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+.shell.immersive .workspace-header,.shell.immersive .explorer,.shell.immersive .catalog-resizer{display:none}
+.shell.immersive .workspace-pages{grid-column:1;grid-row:1}
+.shell.immersive .pane-navigation,.shell.immersive .page-tabs,.shell.immersive .viewer>.toolbar,.shell.immersive .bridge-state,.shell.immersive .viewer>.notice{display:none}
+.shell.immersive .multi-layout.has-splits>.active-pane{box-shadow:none}
+.immersion-exit-zone{position:fixed;z-index:12;top:0;right:0;width:112px;height:64px;padding:8px;display:flex;align-items:flex-start;justify-content:flex-end}
+.immersion-exit{opacity:0;pointer-events:none;background:var(--surface);box-shadow:0 2px 12px var(--shadow);transition:opacity .15s}
+.immersion-exit-zone:hover .immersion-exit,.immersion-exit-zone:focus-within .immersion-exit{opacity:1;pointer-events:auto}
+@media(hover:none){.immersion-exit{opacity:.65;pointer-events:auto}}
