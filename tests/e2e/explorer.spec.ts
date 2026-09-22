@@ -45,7 +45,7 @@ test('type black and white lists hide only tree files, keep folders and persist'
  await expect(page.getByRole('treeitem',{name:'readme.md',exact:true})).toBeVisible();
  await expect(page.getByRole('treeitem',{name:'script.py',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'关闭文件类型筛选'}).click();
- await page.reload();await page.getByRole('treeitem',{name:'研究资料',exact:true}).click();
+ await page.reload();await expect(page.getByRole('treeitem',{name:'研究资料',exact:true})).toHaveAttribute('aria-expanded','true');
  await expect(page.getByRole('treeitem',{name:'readme.md',exact:true})).toBeVisible();
  await expect(page.getByRole('treeitem',{name:'index.html',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'收藏',exact:true}).click();
@@ -81,7 +81,7 @@ test('portrait stays left, rows are compact, immersion and layout preserve ifram
 });
 test('favorites survive reload without opening directories; old hashes migrate on directory read',async({page})=>{
  const s=await json(page,'/api/projects');const mount=s.mounts[0];const old=createHash('sha256').update(`${mount.id}\0readme.md`).digest('hex').slice(0,32);await page.evaluate(id=>localStorage.setItem('favorites',JSON.stringify([id])),old);await page.reload();await page.getByRole('treeitem',{name:'研究资料',exact:true}).click();await expect.poll(()=>page.evaluate(()=>localStorage.getItem('favorites'))).toContain('file:');
- await page.getByRole('button',{name:'收藏',exact:true}).click();await page.getByRole('treeitem',{name:'readme.md',exact:true}).click();await expect(page.locator('.markdown h1')).toHaveText('项目说明');await page.reload();await expect(page.locator('.markdown h1')).toHaveText('项目说明');await expect(page.getByRole('treeitem',{name:'研究资料',exact:true})).toHaveAttribute('aria-expanded','false');
+ await page.getByRole('button',{name:'收藏',exact:true}).click();await page.getByRole('treeitem',{name:'readme.md',exact:true}).click();await expect(page.locator('.markdown h1')).toHaveText('项目说明');await page.reload();await expect(page.locator('.markdown h1')).toHaveText('项目说明');await page.getByRole('button',{name:'文件',exact:true}).click();await expect(page.getByRole('treeitem',{name:'研究资料',exact:true})).toHaveAttribute('aria-expanded','true');
  await fs.rename(path.join(root,'readme.md'),path.join(root,'readme-away.md'));try{await page.getByRole('button',{name:'刷新',exact:true}).click();await expect(page.getByRole('alert')).toContainText('不存在');expect(await page.evaluate(()=>localStorage.getItem('favorites'))).toContain('readme.md');}finally{await fs.rename(path.join(root,'readme-away.md'),path.join(root,'readme.md'));}
 });
 

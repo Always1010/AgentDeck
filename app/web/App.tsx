@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from 'react';
 import { fileReference, parseFileReference, previewPath, type Mount, type Snapshot, type TreeItem, type ToolItem } from '../shared/model.js';
 import { Management } from './Management.js';
 import { Tree, FileIcon } from './Tree.js';
@@ -21,17 +21,49 @@ import type { BridgeAction } from '../shared/bridge.js';
 import { FileOpenMenu } from './FileOpenMenu.js';
 import { FileTypeFilterControl } from './FileTypeFilter.js';
 import { defaultFileTypeFilter, isFileTypeFilter, type FileTypeFilter } from './fileExtensions.js';
+import { openReadingSession, type ReadingSession, type ReadingSnapshot } from './readingSessions.js';
+import { useReadingPersistence } from './useReadingPersistence.js';
 import './style.css';
 import './theme.css';
 const empty:Snapshot={projects:[],mounts:[],revision:0};
+let documentSession: Promise<ReadingSession> | undefined;
+function oldPreference<T>(key:string,fallback:T,valid:(value:unknown)=>value is T):T {
+  try{const value:unknown=JSON.parse(localStorage.getItem(key)||'null');return valid(value)?value:fallback;}catch{return fallback;}
+}
 export function App() {
+  const [boot,setBoot]=useState<{session:ReadingSession|null;error:string}>();
+  useEffect(()=>{
+    let live=true;
+    const params=new URLSearchParams(location.search);
+    // A file link opens its own scene. A ws link restores the entire saved scene.
+    documentSession ||= openReadingSession(params.get('ws') || (params.has('entry')?crypto.randomUUID():undefined));
+    void documentSession.then(session=>{
+      if(!live)return;
+      const url=new URL(location.href);url.searchParams.set('ws',session.id);history.replaceState(null,'',url);
+      setBoot({session,error:''});
+    }).catch(error=>{if(live)setBoot({session:null,error:`当前阅读现场无法保存：${(error as Error).message}`});});
+    return()=>{live=false;};
+  },[]);
+  return boot?<Workbench session={boot.session} startupError={boot.error}/>:<div className="startup-state" role="status">正在恢复阅读现场…</div>;
+}
+function Workbench({session,startupError}:{session:ReadingSession|null;startupError:string}) {
   const standalone=location.pathname==='/preview';
   const [data,setData]=useState<Snapshot>(empty);
-  const [workspace,dispatchWorkspace]=useReducer(workspaceReducer,new URLSearchParams(location.search).get('entry')||'',initialWorkspace);
+  const [workspace,dispatchWorkspace]=useReducer(workspaceReducer,undefined,()=>{
+    if(session?.snapshot)return session.snapshot.workspace;
+    let state=initialWorkspace(new URLSearchParams(location.search).get('entry')||'');
+    const legacy=oldPreference('reading.layout','single',(v):v is 'single'|'columns'|'rows'=>v==='single'||v==='columns'||v==='rows');
+    if(legacy!=='single'){
+      state=workspaceReducer(state,{type:'split',pane:0,direction:legacy});
+      const ratio=oldPreference(`reading.${legacy}-ratio`,50,(v):v is number=>typeof v==='number'&&v>=20&&v<=80);
+      state=workspaceReducer(state,{type:'resize',id:'split-1',ratio});state=workspaceReducer(state,{type:'activate',pane:0});
+    }
+    return state;
+  });
   const pages=workspace.panes[workspace.active];
   const dispatchPages=(action:PageAction,pane:PaneId=workspace.active)=>dispatchWorkspace(action.type==='aliases'?action:{type:'page',pane,action});
   const [closeEmpty,setCloseEmpty]=usePreference<'keep'|'remove'>('reading.close-empty','keep',(value):value is 'keep'|'remove'=>value==='keep'||value==='remove');
-  function activatePane(pane:PaneId){dispatchWorkspace({type:'activate',pane});}
+  function activatePane(pane:PaneId){markActivity();dispatchWorkspace({type:'activate',pane});}
   function splitPane(direction:SplitDirection,pane:PaneId=workspace.active,file?:string){
     const area=document.querySelector('.workspace-pages')?.getBoundingClientRect();
     if(!area)return;
@@ -47,27 +79,37 @@ export function App() {
   function openOther(id:string){splitPane('columns',workspace.active,id);}
   useEffect(()=>{function focusFrame(){queueMicrotask(()=>{const pane=document.activeElement?.closest<HTMLElement>('[data-pane]');if(pane)activatePane(Number(pane.dataset.pane) as PaneId);});}window.addEventListener('blur',focusFrame);return()=>window.removeEventListener('blur',focusFrame);},[]);
   const selected=pages.active;
-  const [openedExpanded,setOpenedExpanded]=usePreference('pages.expanded',true,isBoolean);
+  const [openedExpanded,setOpenedExpanded]=useState(()=>session?.snapshot?.view.openedExpanded??oldPreference('pages.expanded',true,isBoolean));
   const [favorites,setFavorites]=usePreference<string[]>('favorites',[],(v):v is string[]=>Array.isArray(v)&&v.every(x=>typeof x==='string'));
   const [fileTypeFilter,setFileTypeFilter]=usePreference<FileTypeFilter>('explorer.file-types',defaultFileTypeFilter,isFileTypeFilter);
   const [aliases,setAliases]=usePreference<Record<string,string>>('file.aliases',{},(v):v is Record<string,string>=>!!v&&typeof v==='object'&&!Array.isArray(v)&&Object.values(v).every(x=>typeof x==='string'));
   const favoritesRef=useRef(favorites);favoritesRef.current=favorites;
   const aliasesRef=useRef(aliases);aliasesRef.current=aliases;
-  const [view,setView]=useState<'files'|'favorites'|'tools'>('files');
+  const [view,setView]=useState<'files'|'favorites'|'tools'>(session?.snapshot?.view.view||'files');
   const [tools,setTools]=useState<ToolItem[]>([]);
   const [toolPicker,setToolPicker]=useState(false);
-  const [query,setQuery]=useState('');
+  const [query,setQuery]=useState(session?.snapshot?.view.query||'');
   const [refresh,setRefresh]=useState(0);
   const [manage,setManage]=useState<string>();
   const [error,setError]=useState('');
-  const [immersive,setImmersive]=useState(standalone);
-  const [collapsed,setCollapsed]=usePreference('explorer.collapsed',false,isBoolean);
-  const [width,setWidth]=usePreference('explorer.width',280,(v):v is number=>typeof v==='number'&&Number.isFinite(v)&&v>=200&&v<=440);
+  const [immersive,setImmersive]=useState(session?.snapshot?.view.immersive??standalone);
+  const [collapsed,setCollapsed]=useState(()=>session?.snapshot?.view.collapsed??oldPreference('explorer.collapsed',false,isBoolean));
+  const [width,setWidth]=useState(()=>session?.snapshot?.view.width??oldPreference('explorer.width',280,(v):v is number=>typeof v==='number'&&Number.isFinite(v)&&v>=200&&v<=440));
   const [shortcutsEnabled,setShortcutsEnabled]=usePreference('shortcuts.enabled',true,isBoolean);
   const [htmlKeys,setHtmlKeys]=usePreference<HtmlKeyMode>('html.shortcuts','web',isHtmlKeyMode);
   const [navigationEnabled,setNavigationEnabled]=usePreference('shortcuts.navigation',true,isBoolean);
   const [documentFontSize,setDocumentFontSize]=usePreference('reading.font-size',14,(value):value is number=>typeof value==='number'&&Number.isInteger(value)&&value>=12&&value<=24);
-  const positions=useRef(new Map<string,{x:number;y:number}>());
+  const positions=useRef(new Map<string,{x:number;y:number}>(Object.entries(session?.snapshot?.positions||{})));
+  const [positionVersion,updatePositions]=useReducer((v:number)=>v+1,0);
+  const positionTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
+  const [expanded,setExpanded]=useState<Record<string,string[]>>(session?.snapshot?.expanded||{});
+  function positionChanged(key:string,position:{x:number;y:number}){
+    positions.current.set(key,{x:Math.max(0,position.x),y:Math.max(0,position.y)});
+    if(!positionTimer.current)positionTimer.current=setTimeout(()=>{positionTimer.current=undefined;updatePositions();},200);
+  }
+  useEffect(()=>()=>clearTimeout(positionTimer.current),[]);
+  const savedScene=useMemo<ReadingSnapshot>(()=>({version:1,workspace,view:{immersive,collapsed,width,openedExpanded,view,query},positions:Object.fromEntries(positions.current),expanded}),[workspace,immersive,collapsed,width,openedExpanded,view,query,positionVersion,expanded]);
+  const {saveError,retrySave,markActivity}=useReadingPersistence(session,savedScene);
   const [htmlOpening,setHtmlOpening]=usePreference<HtmlOpening>('html.opening','workbench',isHtmlOpening);
   const [previewOrigin,setPreviewOrigin]=useState('');
   const [settingsPage,setSettingsPage]=useState(location.hash==='#settings');
@@ -135,6 +177,7 @@ export function App() {
     if(!id)return;
     const action={type:'page' as const,pane,action:{type:'close' as const,id},closeEmpty:closeEmpty==='remove'};
     const next=workspaceReducer(workspace,action);dispatchWorkspace(action);
+    if(Object.values(next.panes).every(item=>!item.items.length))setImmersive(false);
     requestAnimationFrame(()=>{const active=next.active;const file=next.panes[active].active;(document.getElementById(pageTabId(file,`pane-${active}`))||document.querySelector<HTMLElement>(`.reading-pane[data-pane="${active}"]`)||sidebarRef.current)?.focus({preventScroll:true});});
   }
   function closePreview(id:string,pane:PaneId=workspace.active){closePage(id,pane);}
@@ -192,7 +235,7 @@ export function App() {
           const mounts=data.mounts.filter(m=>m.projectId===project.id);
           return <div className="project-group" key={project.id}>
             {mounts.length!==1&&<div className="project-heading"><span>{project.name}</span><button aria-label={`管理项目：${project.name}`} onClick={()=>setManage(project.id)}>⋯</button></div>}
-            {mounts.map(m=><Tree key={m.id} mount={m} label={mounts.length===1?project.name:m.label} query={query} typeFilter={fileTypeFilter} selected={selected} favorites={favorites} refresh={refresh} open={openFile} internal={open} browserUrl={browserUrl} other={openOther} favorite={favorite} discovered={discovered} manage={mounts.length===1?()=>setManage(project.id):undefined}/>)}
+            {mounts.map(m=><Tree key={m.id} initialExpanded={expanded[m.id]} expansionChanged={paths=>setExpanded(previous=>({...previous,[m.id]:paths}))} mount={m} label={mounts.length===1?project.name:m.label} query={query} typeFilter={fileTypeFilter} selected={selected} favorites={favorites} refresh={refresh} open={openFile} internal={open} browserUrl={browserUrl} other={openOther} favorite={favorite} discovered={discovered} manage={mounts.length===1?()=>setManage(project.id):undefined}/>)}
             {!mounts.length&&<p className="tree-message">尚未挂载目录</p>}
           </div>;
         })}{!data.projects.length&&<div className="catalog-empty"><p>挂载目录后，展开文件夹开始浏览。</p><button onClick={()=>setManage('new')}>添加项目</button></div>}</div>
@@ -209,14 +252,15 @@ export function App() {
         return <section key={paneId} tabIndex={-1} style={style} className={`reading-pane ${workspace.active===paneId?'active-pane':''}`} data-pane={paneId} aria-label={`阅读区 ${paneId+1}`} hidden={!visible} inert={!visible} onPointerDownCapture={()=>activatePane(paneId)} onFocusCapture={()=>activatePane(paneId)}>
           <div className="pane-navigation"><span>阅读区 {paneId+1}</span><button aria-label="后退" title="上一个文件 · Alt＋←" disabled={history.index<=0} onClick={()=>dispatchWorkspace({type:'history',pane:paneId,direction:-1})}>←</button><button aria-label="前进" title="下一个文件 · Alt＋→" disabled={history.index>=history.entries.length-1} onClick={()=>dispatchWorkspace({type:'history',pane:paneId,direction:1})}>→</button></div>
           {!!pane.items.length&&<PageTabs scope={scope} pages={pane.items} active={pane.active} snapshot={data} open={id=>open(id,false,paneId)} keep={id=>keepPage(id,paneId)} close={id=>closePreview(id,paneId)}/>}
-          {pane.items.length?pane.items.map(page=><Viewer documentFontSize={documentFontSize} keyboardActive={workspace.active===paneId} bridgeConfig={{mode:htmlKeys,singles:shortcutsEnabled,navigation:navigationEnabled,escape:immersive||searchActive||workspace.maximized!==null,active:!settingsPage&&!help&&!guide&&!manage&&!toolPicker}} bridgeAction={action=>runAction(action,paneId)} focused={()=>activatePane(paneId)} initialScroll={positions.current.get(`${paneId}:${page.id}`)} positionChanged={position=>positions.current.set(`${paneId}:${page.id}`,position)} scope={scope} key={page.id} id={page.id} active={visible&&page.id===pane.active} titleChanged={title=>dispatchPages({type:'title',id:page.id,title},paneId)} tool={tools.some(t=>t.id===page.id)} toggleTool={()=>void changeTool(page.id,tools.some(t=>t.id===page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} navigate={(mountId,path)=>{activatePane(paneId);openFile(fileReference(mountId,path),false,paneId);}} other={()=>openOther(page.id)}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>{Object.keys(workspace.panes).length===1?'打开报告，专注阅读。':'选择文件，开始对照。'}</h2><p>点击此阅读区，再从侧栏选择文件。双击文件保留标签。</p>{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button onClick={()=>{activatePane(paneId);setCollapsed(false);}}>选择文件</button><button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
+          {pane.items.length?pane.items.map(page=><Viewer documentFontSize={documentFontSize} keyboardActive={workspace.active===paneId} bridgeConfig={{mode:htmlKeys,singles:shortcutsEnabled,navigation:navigationEnabled,escape:immersive||searchActive||workspace.maximized!==null,active:!settingsPage&&!help&&!guide&&!manage&&!toolPicker}} bridgeAction={action=>runAction(action,paneId)} focused={()=>activatePane(paneId)} initialScroll={positions.current.get(`${paneId}:${page.id}`)} positionChanged={position=>positionChanged(`${paneId}:${page.id}`,position)} scope={scope} key={page.id} id={page.id} active={visible&&page.id===pane.active} titleChanged={title=>dispatchPages({type:'title',id:page.id,title},paneId)} tool={tools.some(t=>t.id===page.id)} toggleTool={()=>void changeTool(page.id,tools.some(t=>t.id===page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} navigate={(mountId,path)=>{activatePane(paneId);openFile(fileReference(mountId,path),false,paneId);}} other={()=>openOther(page.id)}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>{Object.keys(workspace.panes).length===1?'打开报告，专注阅读。':'选择文件，开始对照。'}</h2><p>点击此阅读区，再从侧栏选择文件。双击文件保留标签。</p>{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button onClick={()=>{activatePane(paneId);setImmersive(false);setCollapsed(false);}}>选择文件</button><button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
         </section>;
       }}
     </ReadingLayout>
+    {(saveError||startupError)&&<div className="save-warning" role="alert">{saveError||startupError}{session&&<button onClick={retrySave}>重试保存</button>}</div>}
     {error&&<div className="toast" role="alert">{error}<button onClick={()=>setError('')}>关闭</button></div>}
     {manage&&<Management snapshot={data} project={data.projects.find(p=>p.id===manage)} close={()=>setManage(undefined)} saved={()=>{void reload();setRefresh(v=>v+1);}} removed={()=>{void reload();}}/>}
     {toolPicker&&<ToolPicker snapshot={data} close={()=>setToolPicker(false)} saved={()=>void reload()}/>}
     {guide&&<Help snapshot={data} selected={selected} close={()=>setGuide(false)} shortcuts={()=>setHelp(true)}/>}
     {help&&<ShortcutHelp close={()=>setHelp(false)} enabled={shortcutsEnabled} setEnabled={setShortcutsEnabled}/>}
-  </div>{settingsPage&&<Settings close={closeSettings} htmlOpening={htmlOpening} setHtmlOpening={setHtmlOpening} singles={shortcutsEnabled} setSingles={setShortcutsEnabled} navigation={navigationEnabled} setNavigation={setNavigationEnabled} htmlKeys={htmlKeys} setHtmlKeys={setHtmlKeys} closeEmpty={closeEmpty} setCloseEmpty={setCloseEmpty} documentFontSize={documentFontSize} setDocumentFontSize={setDocumentFontSize}/>}</>;
+  </div>{settingsPage&&<Settings currentSession={session?.id} close={closeSettings} htmlOpening={htmlOpening} setHtmlOpening={setHtmlOpening} singles={shortcutsEnabled} setSingles={setShortcutsEnabled} navigation={navigationEnabled} setNavigation={setNavigationEnabled} htmlKeys={htmlKeys} setHtmlKeys={setHtmlKeys} closeEmpty={closeEmpty} setCloseEmpty={setCloseEmpty} documentFontSize={documentFontSize} setDocumentFontSize={setDocumentFontSize}/>}</>;
 }
