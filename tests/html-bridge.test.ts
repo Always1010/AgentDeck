@@ -140,7 +140,7 @@ describe('HTML response injection', () => {
 describe('bridge runtime', () => {
   test('routes reading singles once and honors editor, composition, modifier and preference protection', () => {
     const b = browser(); b.configure();
-    for (const [key, action] of [['o', 'split-rows'], ['e', 'split-columns'], ['x', 'maximize'], ['w', 'close-tab']]) {
+    for (const [key, action] of [['o', 'split-rows'], ['e', 'split-columns'], ['x', 'maximize'], ['w', 'close-tab'], ['q', 'close-pane']]) {
       expect(b.key(key)).toMatchObject({ prevented: true, stopped: true });
       expect(b.sent.at(-1)).toMatchObject({ type: 'action', action });
       const count = b.sent.length;

@@ -7,6 +7,7 @@ export type FileHistory = { entries: string[]; index: number };
 export type Workspace = { panes: Record<PaneId, Pages>; active: PaneId; histories: Record<PaneId, FileHistory>; root: LayoutNode; maximized: PaneId | null; nextPane: number };
 export type WorkspaceAction =
   | { type: 'activate'; pane: PaneId }
+  | { type: 'close-pane'; pane: PaneId }
   | { type: 'page'; pane: PaneId; action: PageAction; closeEmpty?: boolean }
   | { type: 'aliases'; aliases: Record<string, string> }
   | { type: 'history'; pane: PaneId; direction: -1 | 1 }
@@ -31,11 +32,21 @@ function removePane(node: LayoutNode, pane: PaneId): LayoutNode | null {
   const first = removePane(node.first, pane), second = removePane(node.second, pane);
   return first && second ? { ...node, first, second } : first || second;
 }
+function closePane(state: Workspace, pane: PaneId): Workspace {
+  const root = removePane(state.root, pane);
+  if (!root) return { ...state, panes: { [pane]: initialPages() }, histories: { [pane]: { entries: [], index: -1 } }, active: pane, maximized: null };
+  const panes = { ...state.panes }, histories = { ...state.histories };
+  delete panes[pane]; delete histories[pane];
+  const remaining = paneIds(root), oldOrder = paneIds(state.root);
+  const active = state.active === pane ? remaining[Math.min(oldOrder.indexOf(pane), remaining.length - 1)] : state.active;
+  return { ...state, panes, histories, root, active, maximized: state.maximized === pane || remaining.length === 1 ? null : state.maximized };
+}
 export function workspaceReducer(state: Workspace, action: WorkspaceAction): Workspace {
   if (action.type === 'aliases') return { ...state, panes: Object.fromEntries(Object.entries(state.panes).map(([id, pane]) => [id, pagesReducer(pane, action)])), histories: Object.fromEntries(Object.entries(state.histories).map(([id, history]) => [id, { ...history, entries: history.entries.map(id => action.aliases[id] || id) }])) };
   if (action.type === 'resize') return Number.isFinite(action.ratio) ? { ...state, root: mapLayout(state.root, node => node.type === 'split' && node.id === action.id ? { ...node, ratio: Math.max(5, Math.min(95, action.ratio)) } : node) } : state;
   if (!state.panes[action.pane]) return state;
   if (action.type === 'activate') return state.active === action.pane ? state : { ...state, active: action.pane };
+  if (action.type === 'close-pane') return closePane(state, action.pane);
   if (action.type === 'maximize') return { ...state, active: action.pane, maximized: state.maximized !== null || Object.keys(state.panes).length === 1 ? null : action.pane };
   if (action.type === 'split') {
     const id = state.nextPane, file = action.file ?? state.panes[action.pane].active;
@@ -55,10 +66,7 @@ export function workspaceReducer(state: Workspace, action: WorkspaceAction): Wor
   if (panes[action.pane] === state.panes[action.pane]) return state;
   if (action.action.type === 'open' || action.action.type === 'close') histories[action.pane] = visit(histories[action.pane], panes[action.pane].active);
   if (action.closeEmpty && action.action.type === 'close' && !panes[action.pane].items.length && Object.keys(panes).length > 1) {
-    const oldOrder = paneIds(state.root), root = removePane(state.root, action.pane)!;
-    delete panes[action.pane]; delete histories[action.pane];
-    const remaining = paneIds(root), active = state.active === action.pane ? remaining[Math.min(oldOrder.indexOf(action.pane), remaining.length - 1)] : state.active;
-    return { ...state, panes, histories, root, active, maximized: state.maximized === action.pane || remaining.length === 1 ? null : state.maximized };
+    return closePane({ ...state, panes, histories }, action.pane);
   }
   return { ...state, panes, histories };
 }

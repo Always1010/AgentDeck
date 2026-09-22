@@ -151,6 +151,7 @@ export function htmlBridgeScript(mainOrigin: string): string {
         else if (!event.shiftKey && event.key.toLowerCase() === 'e') action = 'split-columns';
         else if (!event.shiftKey && event.key.toLowerCase() === 'x') action = 'maximize';
         else if (!event.shiftKey && event.key.toLowerCase() === 'w') action = 'close-tab';
+        else if (!event.shiftKey && event.key.toLowerCase() === 'q') action = 'close-pane';
         else if (!event.shiftKey && event.key === '/') action = 'search';
         else if (event.key === '?') action = 'help';
       }

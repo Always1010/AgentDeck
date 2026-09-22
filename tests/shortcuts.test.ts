@@ -11,20 +11,20 @@ describe('workbench shortcut ownership', () => {
     expect(shortcutFor(key('/'), false, true)).toBe('search');
     expect(shortcutFor(key('?', { shiftKey: true }), false, true)).toBe('help');
     expect(shortcutFor(key('Escape'), true, false)).toBe('escape');
-    for (const value of ['o', 'e', 'x', 'w', 'b', 'f', '/', '?']) {
+    for (const value of ['o', 'e', 'x', 'w', 'q', 'b', 'f', '/', '?']) {
       expect(shortcutFor(key(value), true, true)).toBeUndefined();
       expect(shortcutFor(key(value), false, false)).toBeUndefined();
     }
   });
-  it('maps the four reading actions to unmodified single keys, including Caps Lock', () => {
-    for (const [value, action] of [['o', 'split-rows'], ['e', 'split-columns'], ['x', 'maximize'], ['w', 'close-tab']]) {
+  it('maps the five reading actions to unmodified single keys, including Caps Lock', () => {
+    for (const [value, action] of [['o', 'split-rows'], ['e', 'split-columns'], ['x', 'maximize'], ['w', 'close-tab'], ['q', 'close-pane']]) {
       expect(shortcutFor(key(value), false, true)).toBe(action);
       expect(shortcutFor(key(value.toUpperCase()), false, true)).toBe(action);
       expect(shortcutFor(key(value.toUpperCase(), { shiftKey: true }), false, true)).toBeUndefined();
     }
   });
   it('never claims browser and operating system modifier combinations', () => {
-    for (const value of ['o', 'e', 'x', 'w', 'b', 'f', 'k', 'l', 'j', '/', '?', 'Escape', 'F11', 'r', 'd', 'Tab']) {
+    for (const value of ['o', 'e', 'x', 'w', 'q', 'b', 'f', 'k', 'l', 'j', '/', '?', 'Escape', 'F11', 'r', 'd', 'Tab']) {
       for (const modifier of ['ctrlKey', 'altKey', 'metaKey']) {
         expect(shortcutFor(key(value, { [modifier]: true }), false, true)).toBeUndefined();
         expect(shortcutFor(key(value, { [modifier]: true, shiftKey: true }), false, true)).toBeUndefined();
@@ -33,7 +33,7 @@ describe('workbench shortcut ownership', () => {
     expect(shortcutFor(key('F11'), false, true)).toBeUndefined();
   });
   it('ignores composition, legacy IME events, repeats and events owned by another control', () => {
-    for (const value of ['o', 'e', 'x', 'w', 'b', 'f', '/', '?', 'Escape']) {
+    for (const value of ['o', 'e', 'x', 'w', 'q', 'b', 'f', '/', '?', 'Escape']) {
       for (const options of [{ isComposing: true }, { keyCode: 229 }, { repeat: true }, { defaultPrevented: true }]) {
         expect(shortcutFor(key(value, options), false, true)).toBeUndefined();
       }

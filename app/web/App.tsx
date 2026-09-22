@@ -15,6 +15,7 @@ import { initialWorkspace, workspaceReducer, layoutRects, minimumPane, dividerSi
 import { ReadingLayout } from './ReadingLayout.js';
 import { ThemePicker } from './Theme.js';
 import { isEditing, restoreFocus, shortcutFor } from './shortcuts.js';
+import { Dialog } from './Dialog.js';
 import { Settings, isHtmlOpening, type HtmlOpening } from './Settings.js';
 import { isHtmlKeyMode, type HtmlKeyMode } from './useHtmlBridge.js';
 import type { BridgeAction } from '../shared/bridge.js';
@@ -63,6 +64,8 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   const pages=workspace.panes[workspace.active];
   const dispatchPages=(action:PageAction,pane:PaneId=workspace.active)=>dispatchWorkspace(action.type==='aliases'?action:{type:'page',pane,action});
   const [closeEmpty,setCloseEmpty]=usePreference<'keep'|'remove'>('reading.close-empty','keep',(value):value is 'keep'|'remove'=>value==='keep'||value==='remove');
+  const [confirmPaneClose,setConfirmPaneClose]=usePreference('reading.confirm-pane-close',true,isBoolean);
+  const [closingPane,setClosingPane]=useState<PaneId|null>(null);
   function activatePane(pane:PaneId){markActivity();dispatchWorkspace({type:'activate',pane});}
   function splitPane(direction:SplitDirection,pane:PaneId=workspace.active,file?:string){
     const area=document.querySelector('.workspace-pages')?.getBoundingClientRect();
@@ -180,6 +183,23 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
     if(Object.values(next.panes).every(item=>!item.items.length))setImmersive(false);
     requestAnimationFrame(()=>{const active=next.active;const file=next.panes[active].active;(document.getElementById(pageTabId(file,`pane-${active}`))||document.querySelector<HTMLElement>(`.reading-pane[data-pane="${active}"]`)||sidebarRef.current)?.focus({preventScroll:true});});
   }
+  function focusPane(pane:PaneId,file:string){
+    // Let the confirmation dialog restore focus before targeting the surviving pane.
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{(document.getElementById(pageTabId(file,`pane-${pane}`))||document.querySelector<HTMLElement>(`.reading-pane[data-pane="${pane}"]`))?.focus({preventScroll:true});}));
+  }
+  function closeReadingPane(pane:PaneId){
+    if(!workspace.panes[pane])return;
+    const action={type:'close-pane' as const,pane},next=workspaceReducer(workspace,action);
+    for(const key of positions.current.keys())if(key.startsWith(`${pane}:`))positions.current.delete(key);
+    dispatchWorkspace(action);setClosingPane(null);
+    if(Object.values(next.panes).every(item=>!item.items.length))setImmersive(false);
+    focusPane(next.active,next.panes[next.active].active);
+  }
+  function requestClosePane(pane:PaneId){
+    if(!workspace.panes[pane])return;
+    if(confirmPaneClose&&workspace.panes[pane].items.length>1)setClosingPane(pane);else closeReadingPane(pane);
+  }
+  function cancelPaneClose(){setClosingPane(null);focusPane(workspace.active,workspace.panes[workspace.active].active);}
   function closePreview(id:string,pane:PaneId=workspace.active){closePage(id,pane);}
   function toggleSidebar(){const show=!searchActive&&(immersive||collapsed);if(searchActive)finishSearch();if(show&&immersive)setImmersive(false);setCollapsed(!show);restoreFocus(sidebarRef.current);}
   function toggleImmersion(){if(!selected&&!immersive)return;if(searchActive)finishSearch();if(!immersive)immersionRestore.current=document.activeElement as HTMLElement|null;setImmersive(!immersive);restoreFocus(immersive?immersionRestore.current:immersionRef.current,immersionRef.current);}
@@ -188,6 +208,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
     if(document.querySelector('[data-workbench-dialog]'))return;
     if(action==='split-rows'||action==='split-columns'){splitPane(action==='split-rows'?'rows':'columns',pane);return;}
     if(action==='maximize'){dispatchWorkspace({type:'maximize',pane});return;}
+    if(action==='close-pane'){requestClosePane(pane);return;}
     if(action==='close-tab'){closePage(workspace.panes[pane]?.active||'',pane);return;}
     if(action==='back'||action==='forward'){dispatchWorkspace({type:'history',pane,direction:action==='back'?-1:1});return;}
     if(action==='escape'){
@@ -203,14 +224,14 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
     if(document.querySelector('[data-workbench-dialog]'))return;
     const action=shortcutFor(e,isEditing(e.target,e.composedPath()),shortcutsEnabled,navigationEnabled);
     if(!action)return;
-    if(['split-rows','split-columns','maximize','close-tab'].includes(action)&&document.querySelector('[role=menu],[data-viewer-settings]'))return;
+    if(['split-rows','split-columns','maximize','close-tab','close-pane'].includes(action)&&document.querySelector('[role=menu],[data-viewer-settings]'))return;
     if(action==='escape'&&(document.querySelector(`[data-viewer-settings][data-pane="${workspace.active}"]`)||(!searchActive&&!immersive&&workspace.maximized===null)))return;
     e.preventDefault();if(!e.repeat)runAction(action);
-  }document.addEventListener('keydown',keydown);return()=>document.removeEventListener('keydown',keydown);},[selected,immersive,collapsed,query,searchActive,shortcutsEnabled,navigationEnabled,workspace,closeEmpty]);
+  }document.addEventListener('keydown',keydown);return()=>document.removeEventListener('keydown',keydown);},[selected,immersive,collapsed,query,searchActive,shortcutsEnabled,navigationEnabled,workspace,closeEmpty,confirmPaneClose]);
   function resize(value:number){setWidth(Math.max(200,Math.min(440,value)));}
   const hidden=!searchActive&&(immersive||collapsed);
   const refs=(view==='tools'?tools:favorites.map(id=>({id,title:''}))).map(({id,title})=>({id,title,ref:parseFileReference(id)})).filter(({id,title,ref})=>`${title} ${ref?.relativePath||id} ${data.mounts.find(m=>m.id===ref?.mountId)?.label||''}`.toLowerCase().includes(query.trim().toLowerCase()));
-  return <><div inert={settingsPage} className={`shell ${hidden?'sidebar-hidden':''} ${immersive?'immersive':''}`} style={{'--sidebar-width':`${width}px`} as CSSProperties}>
+  return <><div inert={settingsPage||closingPane!==null} className={`shell ${hidden?'sidebar-hidden':''} ${immersive?'immersive':''}`} style={{'--sidebar-width':`${width}px`} as CSSProperties}>
     <header className="workspace-header"><button ref={sidebarRef} className="sidebar-toggle" aria-keyshortcuts={shortcutsEnabled?'b':undefined} title={`${hidden?'展开文件侧栏':'收起文件侧栏'}${shortcutsEnabled?' · B（工作台获得焦点时）':''}`} aria-label={hidden?'展开文件侧栏':'收起文件侧栏'} aria-expanded={!hidden} onClick={toggleSidebar}><Icon name="sidebar"/>{shortcutsEnabled&&<kbd aria-hidden="true">B</kbd>}</button><strong className="brand">AgentDeck</strong><span className="workspace-context">本地文件工作台</span><div className="workspace-actions">
       {searchActive&&<button onClick={()=>finishSearch()}>结束筛选</button>}
       <button ref={immersionRef} className="immersion-toggle" disabled={!selected&&!immersive} aria-label={immersive?'退出沉浸':'沉浸'} aria-pressed={immersive} aria-keyshortcuts={shortcutsEnabled?'f':undefined} title={`${immersive?'退出沉浸':'沉浸阅读'}${shortcutsEnabled?' · F（工作台获得焦点时）':''}`} onClick={toggleImmersion}><Icon name={immersive?'collapse':'expand'}/><span>{immersive?'退出沉浸':'沉浸'}</span>{shortcutsEnabled&&<kbd aria-hidden="true">F</kbd>}</button>
@@ -250,9 +271,9 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
       {(paneId,visible,style)=>{
         const pane=workspace.panes[paneId];const scope=`pane-${paneId}`;const history=workspace.histories[paneId];
         return <section key={paneId} tabIndex={-1} style={style} className={`reading-pane ${workspace.active===paneId?'active-pane':''}`} data-pane={paneId} aria-label={`阅读区 ${paneId+1}`} hidden={!visible} inert={!visible} onPointerDownCapture={()=>activatePane(paneId)} onFocusCapture={()=>activatePane(paneId)}>
-          <div className="pane-navigation"><span>阅读区 {paneId+1}</span><button aria-label="后退" title="上一个文件 · Alt＋←" disabled={history.index<=0} onClick={()=>dispatchWorkspace({type:'history',pane:paneId,direction:-1})}>←</button><button aria-label="前进" title="下一个文件 · Alt＋→" disabled={history.index>=history.entries.length-1} onClick={()=>dispatchWorkspace({type:'history',pane:paneId,direction:1})}>→</button></div>
+          <div className="pane-navigation"><span>阅读区 {paneId+1}</span><button aria-label="后退" title="上一个文件 · Alt＋←" disabled={history.index<=0} onClick={()=>dispatchWorkspace({type:'history',pane:paneId,direction:-1})}>←</button><button aria-label="前进" title="下一个文件 · Alt＋→" disabled={history.index>=history.entries.length-1} onClick={()=>dispatchWorkspace({type:'history',pane:paneId,direction:1})}>→</button><button className="pane-close" aria-label={`关闭阅读区 ${paneId+1}`} title="关闭阅读区 · Q" aria-keyshortcuts={shortcutsEnabled?'q':undefined} onClick={()=>requestClosePane(paneId)}><Icon name="close"/></button></div>
           {!!pane.items.length&&<PageTabs scope={scope} pages={pane.items} active={pane.active} snapshot={data} open={id=>open(id,false,paneId)} keep={id=>keepPage(id,paneId)} close={id=>closePreview(id,paneId)}/>}
-          {pane.items.length?pane.items.map(page=><Viewer documentFontSize={documentFontSize} keyboardActive={workspace.active===paneId} bridgeConfig={{mode:htmlKeys,singles:shortcutsEnabled,navigation:navigationEnabled,escape:immersive||searchActive||workspace.maximized!==null,active:!settingsPage&&!help&&!guide&&!manage&&!toolPicker}} bridgeAction={action=>runAction(action,paneId)} focused={()=>activatePane(paneId)} initialScroll={positions.current.get(`${paneId}:${page.id}`)} positionChanged={position=>positionChanged(`${paneId}:${page.id}`,position)} scope={scope} key={page.id} id={page.id} active={visible&&page.id===pane.active} titleChanged={title=>dispatchPages({type:'title',id:page.id,title},paneId)} tool={tools.some(t=>t.id===page.id)} toggleTool={()=>void changeTool(page.id,tools.some(t=>t.id===page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} navigate={(mountId,path)=>{activatePane(paneId);openFile(fileReference(mountId,path),false,paneId);}} other={()=>openOther(page.id)}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>{Object.keys(workspace.panes).length===1?'打开报告，专注阅读。':'选择文件，开始对照。'}</h2><p>点击此阅读区，再从侧栏选择文件。双击文件保留标签。</p>{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button onClick={()=>{activatePane(paneId);setImmersive(false);setCollapsed(false);}}>选择文件</button><button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
+          {pane.items.length?pane.items.map(page=><Viewer documentFontSize={documentFontSize} keyboardActive={workspace.active===paneId} bridgeConfig={{mode:htmlKeys,singles:shortcutsEnabled,navigation:navigationEnabled,escape:immersive||searchActive||workspace.maximized!==null,active:!settingsPage&&!help&&!guide&&!manage&&!toolPicker&&closingPane===null}} bridgeAction={action=>runAction(action,paneId)} focused={()=>activatePane(paneId)} initialScroll={positions.current.get(`${paneId}:${page.id}`)} positionChanged={position=>positionChanged(`${paneId}:${page.id}`,position)} scope={scope} key={page.id} id={page.id} active={visible&&page.id===pane.active} titleChanged={title=>dispatchPages({type:'title',id:page.id,title},paneId)} tool={tools.some(t=>t.id===page.id)} toggleTool={()=>void changeTool(page.id,tools.some(t=>t.id===page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} navigate={(mountId,path)=>{activatePane(paneId);openFile(fileReference(mountId,path),false,paneId);}} other={()=>openOther(page.id)}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>{Object.keys(workspace.panes).length===1?'打开报告，专注阅读。':'选择文件，开始对照。'}</h2><p>点击此阅读区，再从侧栏选择文件。双击文件保留标签。</p>{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button onClick={()=>{activatePane(paneId);setImmersive(false);setCollapsed(false);}}>选择文件</button><button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
         </section>;
       }}
     </ReadingLayout>
@@ -262,5 +283,5 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
     {toolPicker&&<ToolPicker snapshot={data} close={()=>setToolPicker(false)} saved={()=>void reload()}/>}
     {guide&&<Help snapshot={data} selected={selected} close={()=>setGuide(false)} shortcuts={()=>setHelp(true)}/>}
     {help&&<ShortcutHelp close={()=>setHelp(false)} enabled={shortcutsEnabled} setEnabled={setShortcutsEnabled}/>}
-  </div>{settingsPage&&<Settings currentSession={session?.id} close={closeSettings} htmlOpening={htmlOpening} setHtmlOpening={setHtmlOpening} singles={shortcutsEnabled} setSingles={setShortcutsEnabled} navigation={navigationEnabled} setNavigation={setNavigationEnabled} htmlKeys={htmlKeys} setHtmlKeys={setHtmlKeys} closeEmpty={closeEmpty} setCloseEmpty={setCloseEmpty} documentFontSize={documentFontSize} setDocumentFontSize={setDocumentFontSize}/>}</>;
+  </div>{closingPane!==null&&<Dialog label="关闭阅读区" close={cancelPaneClose}><header><h2>关闭阅读区</h2><button aria-label="取消关闭阅读区" onClick={cancelPaneClose}>×</button></header><p>阅读区 {closingPane+1} 中有 {workspace.panes[closingPane]?.items.length||0} 个标签页，确定关闭整个阅读区吗？</p><footer><button onClick={cancelPaneClose}>取消</button><button className="primary" data-autofocus onClick={()=>closeReadingPane(closingPane)}>确定关闭</button></footer></Dialog>}{settingsPage&&<Settings currentSession={session?.id} close={closeSettings} htmlOpening={htmlOpening} setHtmlOpening={setHtmlOpening} singles={shortcutsEnabled} setSingles={setShortcutsEnabled} navigation={navigationEnabled} setNavigation={setNavigationEnabled} htmlKeys={htmlKeys} setHtmlKeys={setHtmlKeys} closeEmpty={closeEmpty} setCloseEmpty={setCloseEmpty} confirmPaneClose={confirmPaneClose} setConfirmPaneClose={setConfirmPaneClose} documentFontSize={documentFontSize} setDocumentFontSize={setDocumentFontSize}/>}</>;
 }
