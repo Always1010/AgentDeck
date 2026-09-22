@@ -133,7 +133,7 @@ export function htmlBridgeScript(mainOrigin: string): string {
     if (!(node instanceof Element)) return false;
     return ['INPUT', 'TEXTAREA', 'SELECT'].includes(node.tagName) || node.isContentEditable ||
       node.getAttribute('contenteditable') === '' || node.getAttribute('contenteditable') === 'true' ||
-      ['textbox', 'searchbox', 'combobox', 'spinbutton'].includes(node.getAttribute('role')) ||
+      ['textbox', 'searchbox', 'combobox', 'spinbutton', 'slider', 'listbox'].includes(node.getAttribute('role')) ||
       node.matches('.monaco-editor, .cm-editor, .CodeMirror');
   });
   window.addEventListener('keydown', event => {
@@ -147,6 +147,10 @@ export function htmlBridgeScript(mainOrigin: string): string {
       else if (config.singles && !editing(event)) {
         if (!event.shiftKey && event.key.toLowerCase() === 'f') action = 'immersive';
         else if (!event.shiftKey && event.key.toLowerCase() === 'b') action = 'sidebar';
+        else if (!event.shiftKey && event.key.toLowerCase() === 'o') action = 'split-rows';
+        else if (!event.shiftKey && event.key.toLowerCase() === 'e') action = 'split-columns';
+        else if (!event.shiftKey && event.key.toLowerCase() === 'x') action = 'maximize';
+        else if (!event.shiftKey && event.key.toLowerCase() === 'w') action = 'close-tab';
         else if (!event.shiftKey && event.key === '/') action = 'search';
         else if (event.key === '?') action = 'help';
       }

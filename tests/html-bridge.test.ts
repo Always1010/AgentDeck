@@ -15,7 +15,10 @@ class FakeElement {
   getAttribute(key: string) { return this.attributes[key] ?? null; }
   hasAttribute(key: string) { return key in this.attributes; }
   setAttribute(key: string, value: string) { this.attributes[key] = value; }
-  matches(selector: string) { return selector.startsWith('a[') && ['A', 'AREA'].includes(this.tagName) && this.hasAttribute('href'); }
+  matches(selector: string) {
+    if (selector.startsWith('a[')) return ['A', 'AREA'].includes(this.tagName) && this.hasAttribute('href');
+    return selector.split(',').some(value => value.trim().startsWith('.') && (this.attributes.class || '').split(/\s+/).includes(value.trim().slice(1)));
+  }
 }
 
 function browser(embedded = true) {
@@ -135,6 +138,31 @@ describe('HTML response injection', () => {
 });
 
 describe('bridge runtime', () => {
+  test('routes reading singles once and honors editor, composition, modifier and preference protection', () => {
+    const b = browser(); b.configure();
+    for (const [key, action] of [['o', 'split-rows'], ['e', 'split-columns'], ['x', 'maximize'], ['w', 'close-tab']]) {
+      expect(b.key(key)).toMatchObject({ prevented: true, stopped: true });
+      expect(b.sent.at(-1)).toMatchObject({ type: 'action', action });
+      const count = b.sent.length;
+      expect(b.key(key, { repeat: true }).prevented).toBe(true);
+      expect(b.sent.length).toBe(count);
+      expect(b.keyup(key).prevented).toBe(true);
+      for (const modifier of ['ctrlKey', 'metaKey', 'altKey', 'shiftKey', 'isComposing']) {
+        expect(b.key(key, { [modifier]: true }).prevented).toBe(false);
+      }
+      expect(b.key(key, { keyCode: 229 }).prevented).toBe(false);
+      b.dispatch('compositionstart'); expect(b.key(key).prevented).toBe(false); b.dispatch('compositionend');
+      for (const editor of [new FakeElement('INPUT'), new FakeElement('TEXTAREA'), new FakeElement('SELECT'), new FakeElement('DIV', { role: 'searchbox' }), new FakeElement('DIV', {}, true), new FakeElement('DIV', { class: 'monaco-editor' }), new FakeElement('DIV', { class: 'cm-editor' }), new FakeElement('DIV', { class: 'CodeMirror' })]) {
+        expect(b.key(key, {}, [new FakeElement('SPAN'), editor]).prevented).toBe(false);
+      }
+      expect(b.sent.length).toBe(count);
+      for (const config of [{ ...fullConfig, singles: false }, { ...fullConfig, mode: 'web' as const }, { ...fullConfig, active: false }]) {
+        b.configure(config); expect(b.key(key).prevented).toBe(false);
+      }
+      b.configure();
+    }
+  });
+
   test('suppresses only matching key releases, including after config changes, and clears ownership on window blur', () => {
     const b = browser(); b.configure();
     expect(b.key('ArrowLeft', { altKey: true, code: 'ArrowLeft' }).prevented).toBe(true);
