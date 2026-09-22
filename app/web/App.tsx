@@ -133,7 +133,7 @@ export function App() {
     if(document.querySelector('[data-workbench-dialog]'))return;
     if(action==='back'||action==='forward'){dispatchWorkspace({type:'history',pane,direction:action==='back'?-1:1});return;}
     if(action==='escape'){
-      if(document.querySelector(`[data-pane="${pane}"] [data-viewer-settings]`))return;
+      if(document.querySelector(`[data-viewer-settings][data-pane="${pane}"]`))return;
       if(searchActive)finishSearch();else if(immersive)toggleImmersion();return;
     }
     if(action==='sidebar')toggleSidebar();
@@ -145,7 +145,7 @@ export function App() {
     if(document.querySelector('[data-workbench-dialog]'))return;
     const action=shortcutFor(e,isEditing(e.target),shortcutsEnabled,navigationEnabled);
     if(!action)return;
-    if(action==='escape'&&(document.querySelector(`[data-pane="${workspace.active}"] [data-viewer-settings]`)||(!searchActive&&!immersive)))return;
+    if(action==='escape'&&(document.querySelector(`[data-viewer-settings][data-pane="${workspace.active}"]`)||(!searchActive&&!immersive)))return;
     e.preventDefault();if(!e.repeat)runAction(action);
   }document.addEventListener('keydown',keydown);return()=>document.removeEventListener('keydown',keydown);},[selected,immersive,collapsed,query,searchActive,shortcutsEnabled,navigationEnabled,workspace.active]);
   function resize(value:number){setWidth(Math.max(200,Math.min(440,value)));}

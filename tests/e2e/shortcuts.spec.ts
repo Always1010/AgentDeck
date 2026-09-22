@@ -42,7 +42,7 @@ test('single F toggles without reload; iframe typing is untouched; Escape closes
   await expect(page.locator('.shell')).toHaveClass(/immersive/);
   await page.getByRole('button', { name: '更多设置' }).click();
   await page.keyboard.press('Escape');
-  await expect(page.locator('.viewer-settings')).toHaveCount(0);
+  await expect(page.locator('[data-viewer-settings]')).toHaveCount(0);
   await expect(page.locator('.shell')).toHaveClass(/immersive/);
   await page.keyboard.press('?');
   await expect(page.getByRole('dialog', { name: '快捷键', exact: true })).toBeVisible();
