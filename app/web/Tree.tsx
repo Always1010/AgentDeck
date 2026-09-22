@@ -3,7 +3,7 @@ import { fileReference, type Mount, type TreeItem } from '../shared/model.js';
 import { api } from './api.js';
 
 type Listing = { items?: TreeItem[]; error?: string; loading?: boolean };
-type Props = { mount: Mount; label: string; query: string; selected: string; favorites: string[]; refresh: number; open: (id: string) => void; favorite: (id: string) => void; discovered: (mount: Mount, items: TreeItem[]) => void; manage?: () => void };
+type Props = { mount: Mount; label: string; query: string; selected: string; favorites: string[]; refresh: number; open: (id: string, keep?: boolean) => void; favorite: (id: string) => void; discovered: (mount: Mount, items: TreeItem[]) => void; manage?: () => void };
 export function FileIcon({name}:{name:string}) {
   const ext = name.split('.').pop()?.toLowerCase();
   const kind = /^(html?|md|markdown|csv)$/.test(ext || '') ? ext : 'file';
@@ -61,7 +61,7 @@ export function Tree({mount,label,query,selected,favorites,refresh,open,favorite
           if(item.directory)return directory(item.relativePath,item.name,depth+1);
           const id=fileReference(mount.id,item.relativePath);const starred=favorites.includes(id);
           return <div className={`file-row ${selected===id?'selected':''}`} role="none" key={item.relativePath} style={{paddingLeft:8+(depth+1)*14}}>
-            <button className="node-main" role="treeitem" aria-level={depth+2} aria-selected={selected===id} title={item.relativePath} onClick={()=>open(id)}><FileIcon name={item.name}/><span className="filename">{item.name}</span></button>
+            <button className="node-main" role="treeitem" aria-level={depth+2} aria-selected={selected===id} title={item.relativePath} onClick={()=>open(id)} onDoubleClick={()=>open(id,true)}><FileIcon name={item.name}/><span className="filename">{item.name}</span></button>
             <button className={`row-action ${starred?'starred':''}`} aria-label={`${starred?'取消收藏':'收藏'}：${item.name}`} onClick={()=>favorite(id)}>{starred?'★':'☆'}</button>
           </div>;
         })}
