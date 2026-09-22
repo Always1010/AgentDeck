@@ -3,7 +3,7 @@ import { restoreFocus, shortcutFor } from './shortcuts.js';
 
 const focusable = 'button:not(:disabled),a[href],input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]';
 
-export function Dialog({ label, close, children, wide = false, nested = false, className = '' }: { label: string; close: () => void; children: ReactNode; wide?: boolean; nested?: boolean; className?: string }) {
+export function Dialog({ label, close, children, wide = false, nested = false, backdropClose = false, className = '' }: { label: string; close: () => void; children: ReactNode; wide?: boolean; nested?: boolean; backdropClose?: boolean; className?: string }) {
   const ref = useRef<HTMLElement>(null);
   const closeRef = useRef(close);
   closeRef.current = close;
@@ -37,5 +37,5 @@ export function Dialog({ label, close, children, wide = false, nested = false, c
       restoreFocus(previous, document.querySelector<HTMLElement>('.immersion-toggle'));
     };
   }, []);
-  return <div className={`overlay ${nested ? 'nested' : ''}`}><section ref={ref} role="dialog" aria-modal="true" aria-label={label} data-workbench-dialog tabIndex={-1} className={`dialog ${wide ? 'wide' : ''} ${className}`}>{children}</section></div>;
+  return <div className={`overlay ${nested ? 'nested' : ''}`} onPointerDown={event => { if (backdropClose && event.target === event.currentTarget) close(); }}><section ref={ref} role="dialog" aria-modal="true" aria-label={label} data-workbench-dialog tabIndex={-1} className={`dialog ${wide ? 'wide' : ''} ${className}`}>{children}</section></div>;
 }

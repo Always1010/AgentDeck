@@ -21,26 +21,27 @@ test.beforeEach(async ({ page }) => {
   await page.getByRole('treeitem', { name: '设置验证', exact: true }).click();
 });
 
-test('settings is a persistent page and preserves the mounted report and theme', async ({ page }) => {
+test('settings dialog preserves the mounted report and theme', async ({ page }) => {
   await page.getByRole('treeitem', { name: 'report.html', exact: true }).dblclick();
   const input = page.frameLocator('iframe').locator('#draft');
   await input.fill('继续阅读');
   const frame = page.frames().find(f => f.url().endsWith('/report.html'))!;
   await frame.evaluate(() => (window as unknown as { identity: string }).identity = 'same-frame');
   await page.getByRole('button', { name: '设置', exact: true }).click();
-  await expect(page).toHaveURL(/#settings$/);
-  const settings = page.getByRole('main', { name: '设置页面' });
+  await expect(page).not.toHaveURL(/#settings$/);
+  const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await expect(settings).toBeVisible();
   await expect(settings.getByLabel('HTML 默认打开方式')).toHaveValue('workbench');
   await settings.getByLabel('HTML 默认打开方式').selectOption('browser');
   await settings.getByRole('button', { name: '外观', exact: true }).click();
   await settings.getByLabel('界面主题').selectOption('dark');
-  await settings.getByRole('button', { name: '返回工作台' }).click();
+  await settings.getByRole('button', { name: '关闭设置' }).click();
   await expect(input).toHaveValue('继续阅读');
   expect(await frame.evaluate(() => (window as unknown as { identity: string }).identity)).toBe('same-frame');
   await expect(page.getByLabel('界面主题')).toHaveValue('dark');
-  await page.goto('/#settings');
-  await expect(page.getByLabel('HTML 默认打开方式')).toHaveValue('browser');
+  await page.reload();
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await expect(settings.getByLabel('HTML 默认打开方式')).toHaveValue('browser');
   await page.screenshot({ path: 'test-results/settings-desktop.png' });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await settings.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
@@ -52,7 +53,7 @@ test('settings is a persistent page and preserves the mounted report and theme',
 test('HTML preference opens the raw page once and explicit internal opening overrides it', async ({ page, context }) => {
   await page.getByRole('button', { name: '设置', exact: true }).click();
   await page.getByLabel('HTML 默认打开方式').selectOption('browser');
-  await page.getByRole('button', { name: '返回工作台' }).click();
+  await page.getByRole('button', { name: '关闭设置' }).click();
   const popupPromise = page.waitForEvent('popup');
   await page.getByRole('treeitem', { name: 'report.html', exact: true }).dblclick();
   const popup = await popupPromise;
@@ -68,4 +69,25 @@ test('HTML preference opens the raw page once and explicit internal opening over
   expect(context.pages()).toHaveLength(1);
   await page.getByRole('treeitem', { name: 'note.md', exact: true }).click();
   await expect(page.locator('.markdown h1')).toHaveText('笔记');
+});
+
+
+test('settings closes on outside click or Escape and restores focus without reloading HTML', async ({ page }) => {
+  await page.getByRole('treeitem', { name: 'report.html', exact: true }).dblclick();
+  const input = page.frameLocator('iframe').locator('#draft');
+  await input.fill('未保存输入');
+  const frame = page.frames().find(f => f.url().endsWith('/report.html'))!;
+  const settingsButton = page.getByRole('button', { name: '设置', exact: true });
+  await settingsButton.click();
+  await expect(page.getByRole('dialog', { name: '设置', exact: true })).toBeVisible();
+  await expect(page.locator('.shell')).toHaveAttribute('inert', '');
+  await page.locator('.overlay').click({ position: { x: 4, y: 4 } });
+  await expect(page.getByRole('dialog', { name: '设置', exact: true })).toHaveCount(0);
+  await expect(settingsButton).toBeFocused();
+  await expect(input).toHaveValue('未保存输入');
+  expect(page.frames().find(f => f.url().endsWith('/report.html'))).toBe(frame);
+  await settingsButton.click();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: '设置', exact: true })).toHaveCount(0);
+  await expect(settingsButton).toBeFocused();
 });

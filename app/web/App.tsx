@@ -61,8 +61,8 @@ export function App() {
   const [htmlOpening,setHtmlOpening]=usePreference<HtmlOpening>('html.opening','workbench',isHtmlOpening);
   const [previewOrigin,setPreviewOrigin]=useState('');
   const [settingsPage,setSettingsPage]=useState(location.hash==='#settings');
-  useEffect(()=>{const changed=()=>setSettingsPage(location.hash==='#settings');window.addEventListener('hashchange',changed);return()=>window.removeEventListener('hashchange',changed);},[]);
-  function closeSettings(){history.replaceState(null,'',location.pathname+location.search);setSettingsPage(false);}
+  useEffect(()=>{if(location.hash==='#settings')history.replaceState(null,'',location.pathname+location.search);},[]);
+  function closeSettings(){setSettingsPage(false);}
   useEffect(()=>{void api<{previewOrigin:string}>('/api/status').then(status=>setPreviewOrigin(status.previewOrigin)).catch(()=>setError('无法获取 HTML 预览地址，请刷新工作台。'));},[]);
   const [help,setHelp]=useState(false);
   const [guide,setGuide]=useState(false);
@@ -157,7 +157,7 @@ export function App() {
       <button ref={immersionRef} className="immersion-toggle" disabled={!selected&&!immersive} aria-label={immersive?'退出沉浸':'沉浸'} aria-pressed={immersive} aria-keyshortcuts={shortcutsEnabled?'f':undefined} title={`${immersive?'退出沉浸':'沉浸阅读'}${shortcutsEnabled?' · F（工作台获得焦点时）':''}`} onClick={toggleImmersion}><Icon name={immersive?'collapse':'expand'}/><span>{immersive?'退出沉浸':'沉浸'}</span>{shortcutsEnabled&&<kbd aria-hidden="true">F</kbd>}</button>
       <label className="layout-picker"><span className="sr-only">阅读布局</span><select aria-label="阅读布局" value={layout} onChange={e=>setLayout(e.target.value as Layout)}><option value="single">单屏</option><option value="columns">左右分屏</option><option value="rows">上下分屏</option></select></label>
       <ThemePicker/>
-      <button aria-label="设置" onClick={()=>{location.hash='settings';setSettingsPage(true);}}>设置</button>
+      <button aria-label="设置" onClick={()=>setSettingsPage(true)}>设置</button>
       <button aria-label="使用帮助" onClick={()=>setGuide(true)}>使用帮助</button>
       <button aria-label="快捷键" title="快捷键" onClick={()=>setHelp(true)}>?</button>
     </div></header>
