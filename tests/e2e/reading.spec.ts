@@ -10,6 +10,7 @@ test.beforeAll(async () => {
   for (const name of ['a', 'b', 'c', 'd']) {
     await fs.writeFile(path.join(root, `${name}.html`), `<title>${name}</title><input id="draft"><div style="height:3000px">${name}</div><script>window.pageKeys=0;window.addEventListener('keydown',e=>{if(e.key==='f')window.pageKeys++;},true)</script>`);
     await fs.writeFile(path.join(root, `${name}.md`), `# ${name}\n\n${'阅读内容\n\n'.repeat(200)}`);
+    await fs.writeFile(path.join(root, `${name}.txt`), `纯文本 ${name}\n`);
   }
 });
 test.afterAll(async () => { await fs.rm(root, { recursive: true, force: true }); });
@@ -198,6 +199,30 @@ test('direct source and copy actions leave HTML input intact and close its popov
   await first.getByRole('button',{name:'更多设置'}).click();
   await first.frameLocator('iframe').locator('body').click({position:{x:60,y:150}});
   await expect(page.locator('[data-viewer-settings]')).toHaveCount(0);
+});
+
+test('document font size persists for Markdown and text while HTML keeps its own size',async({page})=>{
+  await page.getByRole('treeitem',{name:'a.md',exact:true}).click();
+  const first=pane(page,0);
+  await expect(first.locator('.reader')).toHaveCSS('font-size','14px');
+  await page.getByRole('button',{name:'设置',exact:true}).click();
+  const settings=page.getByRole('dialog',{name:'设置',exact:true});
+  await settings.getByRole('button',{name:'阅读布局'}).click();
+  const slider=settings.getByRole('slider',{name:'文档字号'});
+  await slider.focus();await page.keyboard.press('End');
+  await expect(slider).toHaveValue('24');
+  await expect(first.locator('.reader')).toHaveCSS('font-size','24px');
+  await settings.getByRole('button',{name:'关闭设置'}).click();
+  await page.reload();
+  await expect(first.locator('.reader')).toHaveCSS('font-size','24px');
+  await page.getByRole('treeitem',{name:'阅读验证',exact:true}).click();
+  await page.getByRole('treeitem',{name:'a.txt',exact:true}).click();
+  await expect(first.locator('.viewer:not([hidden]) .reader')).toHaveCSS('font-size','24px');
+  await expect(first.locator('.viewer:not([hidden]) pre')).toHaveCSS('font-size','24px');
+  await page.getByRole('treeitem',{name:'a.html',exact:true}).click();
+  await expect(first.frameLocator('iframe').locator('body')).toHaveCSS('font-size','16px');
+  await first.getByRole('button',{name:'查看源码'}).click();
+  await expect(first.locator('.viewer:not([hidden]) .reader')).toHaveCSS('font-size','13px');
 });
 
 test('Alt navigation wins over splitter and folder arrow handling', async ({ page }) => {

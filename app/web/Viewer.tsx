@@ -9,7 +9,7 @@ import { usePreference } from './preferences.js';
 import { useHtmlBridge, type HtmlKeyMode } from './useHtmlBridge.js';
 import type { BridgeAction, BridgeConfig } from '../shared/bridge.js';
 import { pagePanelId, pageTabId } from './PageTabs.js';
-export function Viewer({keyboardActive=true,bridgeConfig,bridgeAction,focused,initialScroll,positionChanged,scope,id,active,titleChanged,tool,toggleTool,favorite,toggleFavorite,back,navigate,other}:{keyboardActive?:boolean;bridgeConfig?:BridgeConfig;bridgeAction?:(action:BridgeAction)=>void;focused?:()=>void;initialScroll?:{x:number;y:number};positionChanged?:(position:{x:number;y:number})=>void;scope?:string;other?:()=>void;id:string;active:boolean;titleChanged:(title:string)=>void;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;back:()=>void;navigate:(mountId:string,path:string)=>void}) {
+export function Viewer({documentFontSize=14,keyboardActive=true,bridgeConfig,bridgeAction,focused,initialScroll,positionChanged,scope,id,active,titleChanged,tool,toggleTool,favorite,toggleFavorite,back,navigate,other}:{documentFontSize?:number;keyboardActive?:boolean;bridgeConfig?:BridgeConfig;bridgeAction?:(action:BridgeAction)=>void;focused?:()=>void;initialScroll?:{x:number;y:number};positionChanged?:(position:{x:number;y:number})=>void;scope?:string;other?:()=>void;id:string;active:boolean;titleChanged:(title:string)=>void;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;back:()=>void;navigate:(mountId:string,path:string)=>void}) {
   const [entry,setEntry]=useState<Entry>();const [text,setText]=useState('');const [source,setSource]=useState(false);
   const [version,setVersion]=useState(0);const [pending,setPending]=useState('');const [error,setError]=useState('');
   const [loading,setLoading]=useState(false);const [settings,setSettings]=useState(false);const [downloadOnly,setDownloadOnly]=useState(false);
@@ -79,7 +79,7 @@ export function Viewer({keyboardActive=true,bridgeConfig,bridgeAction,focused,in
     {error&&<div role="alert">{error}<button onClick={()=>void load()}>重试</button></div>}
     {!entry?<div className="empty">{loading?'正在打开文件…':'文件暂不可用。旧收藏可在展开原目录后自动恢复。'}</div>:downloadOnly?<div className="empty"><p>此文件暂不支持文本预览，或超过 10 MiB。</p><a href={download} download>下载原文件</a></div>:<>
       {/^html?$/.test(entry.format)&&<iframe ref={bridge.frame} onLoad={bridge.onLoad} style={{display:source?'none':undefined}} key={`${id}:${version}`} title={entry.title} src={entry.previewUrl} sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"/>}
-      {(source||!/^html?$/.test(entry.format))&&<div className="reader" ref={readerRef} onScroll={event=>positionChanged?.({x:event.currentTarget.scrollLeft,y:event.currentTarget.scrollTop})}>{!source&&/^(md|markdown)$/.test(entry.format)?<Markdown text={text} entry={entry} previewOrigin={new URL(entry.previewUrl!).origin} navigate={path=>navigate(entry.mountId,path)}/>:<pre>{text}</pre>}</div>}
+      {(source||!/^html?$/.test(entry.format))&&<div className="reader" style={{fontSize:/^html?$/.test(entry.format)?undefined:documentFontSize}} ref={readerRef} onScroll={event=>positionChanged?.({x:event.currentTarget.scrollLeft,y:event.currentTarget.scrollTop})}>{!source&&/^(md|markdown)$/.test(entry.format)?<Markdown text={text} entry={entry} previewOrigin={new URL(entry.previewUrl!).origin} navigate={path=>navigate(entry.mountId,path)}/>:<pre>{text}</pre>}</div>}
     </>}
   </section>;
 }
