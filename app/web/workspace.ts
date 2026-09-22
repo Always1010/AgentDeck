@@ -38,9 +38,9 @@ export function workspaceReducer(state: Workspace, action: WorkspaceAction): Wor
   if (action.type === 'activate') return state.active === action.pane ? state : { ...state, active: action.pane };
   if (action.type === 'maximize') return { ...state, active: action.pane, maximized: state.maximized !== null || Object.keys(state.panes).length === 1 ? null : action.pane };
   if (action.type === 'split') {
-    const id = state.nextPane;
+    const id = state.nextPane, file = action.file ?? state.panes[action.pane].active;
     return { ...state, active: id, nextPane: id + 1, maximized: null,
-      panes: { ...state.panes, [id]: initialPages(action.file) }, histories: { ...state.histories, [id]: { entries: action.file ? [action.file] : [], index: action.file ? 0 : -1 } },
+      panes: { ...state.panes, [id]: initialPages(file) }, histories: { ...state.histories, [id]: { entries: file ? [file] : [], index: file ? 0 : -1 } },
       root: mapLayout(state.root, node => node.type === 'pane' && node.pane === action.pane ? { type: 'split', id: `split-${id}`, direction: action.direction, ratio: 50, first: node, second: { type: 'pane', pane: id } } : node) };
   }
   const panes = { ...state.panes }, histories = { ...state.histories };

@@ -54,7 +54,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
     let state=initialWorkspace(new URLSearchParams(location.search).get('entry')||'');
     const legacy=oldPreference('reading.layout','single',(v):v is 'single'|'columns'|'rows'=>v==='single'||v==='columns'||v==='rows');
     if(legacy!=='single'){
-      state=workspaceReducer(state,{type:'split',pane:0,direction:legacy});
+      state=workspaceReducer(state,{type:'split',pane:0,direction:legacy,file:''});
       const ratio=oldPreference(`reading.${legacy}-ratio`,50,(v):v is number=>typeof v==='number'&&v>=20&&v<=80);
       state=workspaceReducer(state,{type:'resize',id:'split-1',ratio});state=workspaceReducer(state,{type:'activate',pane:0});
     }

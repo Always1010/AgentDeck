@@ -15,7 +15,7 @@ test('history preserves pinned pages and opens missing targets without replacing
 
 test('pane previews and kept pages are independent, including the same file', () => {
   let state = initialWorkspace('same');
-  state = workspaceReducer(state, { type: 'split', pane: 0, direction: 'columns' });
+  state = workspaceReducer(state, { type: 'split', pane: 0, direction: 'columns', file: '' });
   state = workspaceReducer(state, { type: 'page', pane: 1, action: { type: 'open', id: 'same' } });
   state = workspaceReducer(state, { type: 'page', pane: 1, action: { type: 'open', id: 'other' } });
   expect(state.panes[0].active).toBe('same');
@@ -41,7 +41,7 @@ test('history survives replaced previews, branches on new visits and is pane-loc
   state = workspaceReducer(state,{type:'page',pane:1,action:{type:'open',id:'x'}});
   state = workspaceReducer(state,{type:'page',pane:0,action:{type:'open',id:'d'}});
   expect(state.histories[0]).toEqual({entries:['a','b','d'],index:2});
-  expect(state.histories[1]).toEqual({entries:['x'],index:0});
+  expect(state.histories[1]).toEqual({entries:['b','x'],index:1});
   expect(workspaceReducer(state,{type:'history',pane:0,direction:1})).toBe(state);
   state = workspaceReducer(state,{type:'page',pane:0,action:{type:'open',id:'d',keep:true}});
   expect(state.histories[0].entries).toEqual(['a','b','d']);
@@ -89,4 +89,19 @@ test('mixed layout geometry preserves the other half and does not create negativ
   expect(dividers).toHaveLength(2);
   const small = layoutRects(state.root, { x: 0, y: 0, width: 100, height: 100 });
   expect(Object.values(small.panes).every(p => p.width >= 0 && p.height >= 0)).toBe(true);
+});
+
+
+test('splits copy only the active document into an independent pane and accept explicit targets', () => {
+  let state = initialWorkspace('background');
+  state = workspaceReducer(state, { type: 'page', pane: 0, action: { type: 'open', id: 'active' } });
+  for (const direction of ['rows', 'columns'] as const) {
+    const next = workspaceReducer(state, { type: 'split', pane: 0, direction });
+    expect(next.panes[1].items).toEqual([{ id: 'active', kept: true }]);
+    expect(next.panes[1]).not.toBe(state.panes[0]);
+    expect(next.panes[0]).toBe(state.panes[0]);
+    expect(next.histories[1]).toEqual({ entries: ['active'], index: 0 });
+  }
+  expect(workspaceReducer(state, { type: 'split', pane: 0, direction: 'rows', file: 'other' }).panes[1].active).toBe('other');
+  expect(workspaceReducer(initialWorkspace(), { type: 'split', pane: 0, direction: 'rows' }).panes[1].items).toEqual([]);
 });

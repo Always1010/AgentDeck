@@ -64,9 +64,52 @@ test('mixed panes retain same-file instances through repeated splits, mouse resi
   await page.screenshot({ path: 'test-results/reading-portrait.png' });
 });
 
+test('E and O copy only the active HTML or text file into an independent kept tab', async ({ page }) => {
+  const first = pane(page, 0), second = pane(page, 1), third = pane(page, 2);
+  await page.getByRole('treeitem', { name: 'b.md', exact: true }).dblclick();
+  await page.getByRole('treeitem', { name: 'a.html', exact: true }).dblclick();
+  await first.frameLocator('iframe').locator('#draft').fill('原页面未保存的输入');
+  const original = page.frames().find(frame => frame.url().endsWith('/a.html'))!;
+  await original.evaluate(() => { (window as unknown as { identity: string }).identity = 'original'; });
+  await first.getByRole('tab', { name: 'a.html', exact: true }).click();
+  await page.keyboard.press('e');
+  await expect(second.getByRole('tab')).toHaveText('a.html');
+  await expect(second.locator('.page-tab.temporary')).toHaveCount(0);
+  await expect(second.getByRole('button', { name: '后退', exact: true })).toBeDisabled();
+  await expect(second.frameLocator('iframe').locator('#draft')).toHaveValue('');
+  await second.frameLocator('iframe').locator('#draft').fill('复制页面的独立输入');
+  await expect(first.frameLocator('iframe').locator('#draft')).toHaveValue('原页面未保存的输入');
+  expect(await original.evaluate(() => (window as unknown as { identity: string }).identity)).toBe('original');
+  await expect(first.getByRole('tab')).toHaveText(['b.md', 'a.html']);
+
+  await page.getByRole('treeitem', { name: 'c.txt', exact: true }).click();
+  await expect(second.getByRole('tab')).toHaveText(['a.html', 'c.txt']);
+  await page.keyboard.press('o');
+  await expect(third.getByRole('tab')).toHaveText('c.txt');
+  await expect(third.locator('.page-tab.temporary')).toHaveCount(0);
+  await expect(third.locator('.reader pre')).toHaveText('纯文本 c\n');
+  await expect(third.getByRole('button', { name: '后退', exact: true })).toBeDisabled();
+  await expect(third.locator('iframe')).toHaveCount(0);
+  const upper = await second.boundingBox(), lower = await third.boundingBox();
+  expect(lower!.y).toBeGreaterThan(upper!.y + upper!.height - 1);
+  await second.getByRole('tab', { name: 'a.html', exact: true }).click();
+  await expect(second.frameLocator('iframe').locator('#draft')).toHaveValue('复制页面的独立输入');
+  await expect(first.frameLocator('iframe').locator('#draft')).toHaveValue('原页面未保存的输入');
+  expect(await original.evaluate(() => (window as unknown as { identity: string }).identity)).toBe('original');
+});
+
+test('splitting an empty reading area creates another empty area', async ({ page }) => {
+  await page.keyboard.press('e');
+  await expect(page.locator('[data-pane]')).toHaveCount(2);
+  await expect(pane(page, 0).getByRole('tab')).toHaveCount(0);
+  await expect(pane(page, 1).getByRole('tab')).toHaveCount(0);
+  await expect(pane(page, 1).getByRole('button', { name: '选择文件', exact: true })).toBeVisible();
+});
+
 test('new files replace only the selected pane temporary page', async ({ page }) => {
   await page.getByRole('treeitem', { name: 'a.md', exact: true }).click();
   await page.getByRole('button', { name: '左右分屏', exact: true }).click();
+  await page.keyboard.press('w'); // Start this replacement scenario with an empty destination.
   await pane(page, 1).getByRole('button', { name: '选择文件', exact: true }).click();
   await page.getByRole('treeitem', { name: 'b.md', exact: true }).click();
   await page.getByRole('treeitem', { name: 'c.md', exact: true }).click();
@@ -90,6 +133,7 @@ test('W closes only once per press and last-tab policy keeps or removes the empt
   await page.keyboard.up('w');
   await page.keyboard.press('e');
   await expect(pane(page, 1)).toBeVisible();
+  await page.keyboard.press('w'); // Close the copied a.md before testing the last-tab policy.
   await page.getByRole('treeitem', { name: 'c.md', exact: true }).click();
   await page.keyboard.press('w');
   await expect(pane(page, 1)).toBeVisible();
@@ -150,6 +194,7 @@ test('Alt history restores replaced text previews, isolates panes and truncates 
   await page.getByRole('treeitem', { name: 'd.md', exact: true }).click();
   await expect(first.getByRole('button', { name: '前进', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: '上下分屏', exact: true }).click();
+  await page.keyboard.press('w');
   await second.getByRole('button', { name: '选择文件', exact: true }).click();
   await page.getByRole('treeitem', { name: 'a.md', exact: true }).click();
   await page.getByRole('treeitem', { name: 'c.md', exact: true }).click();
@@ -179,6 +224,8 @@ test('HTML focus routes shortcuts to its own pane, protects typing and supports 
   await expect(page.locator('.shell')).not.toHaveClass(/immersive/);
   await first.frameLocator('iframe').locator('body').click({position:{x:60,y:150}});
   await page.keyboard.press('e');
+  await second.getByRole('tab', { name: 'a.html', exact: true }).click();
+  await page.keyboard.press('w');
   await second.getByRole('button', { name: '选择文件', exact: true }).click();
   await page.getByRole('treeitem', { name: 'b.html', exact: true }).click();
   await page.getByRole('treeitem', { name: 'c.html', exact: true }).click();
@@ -226,6 +273,7 @@ test('more settings floats without resizing, closes outside and on Escape', asyn
   await page.getByRole('treeitem', { name: 'a.md', exact: true }).click();
   await page.getByRole('button', { name: '左右分屏', exact: true }).click();
   const first = pane(page, 0), second = pane(page, 1);
+  await page.keyboard.press('w');
   await second.getByRole('button', { name: '选择文件', exact: true }).click();
   await page.getByRole('treeitem', { name: 'b.md', exact: true }).click();
   const before=await first.locator('.reader').boundingBox();
