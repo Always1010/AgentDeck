@@ -201,6 +201,47 @@ test('direct source and copy actions leave HTML input intact and close its popov
   await expect(page.locator('[data-viewer-settings]')).toHaveCount(0);
 });
 
+test('seven icon actions fit one row and overflow from right to left as pane narrows',async({page,context})=>{
+  await context.grantPermissions(['clipboard-read','clipboard-write']);
+  await page.getByRole('treeitem',{name:'a.html',exact:true}).dblclick();
+  const first=pane(page,0),toolbar=first.locator('.toolbar');
+  const order=['refresh','favorite','external','split','source','copy'];
+  const actionIds=()=>toolbar.locator('[data-toolbar-action]').evaluateAll(elements=>elements.map(element=>element.getAttribute('data-toolbar-action')));
+  await expect.poll(actionIds).toEqual(order);
+  await expect(first.locator('.quick-actions')).toHaveCount(0);
+  const hints=await toolbar.locator('.icon-button').evaluateAll(elements=>elements.map(element=>({label:element.getAttribute('aria-label'),hint:element.getAttribute('data-tooltip'),text:element.textContent?.trim()})));
+  expect(hints).toHaveLength(7);
+  for(const hint of hints){expect(hint.label).toBeTruthy();expect(hint.hint).toBeTruthy();expect(hint.text).toBe('');}
+  await toolbar.getByRole('button',{name:'刷新',exact:true}).hover();
+  expect(await toolbar.getByRole('button',{name:'刷新',exact:true}).evaluate(element=>getComputedStyle(element,'::after').visibility)).toBe('visible');
+  await page.screenshot({path:'test-results/toolbar-wide.png'});
+  const draft=first.frameLocator('iframe').locator('#draft');await draft.fill('缩放后保留');
+  const frame=page.frames().find(item=>item.url().endsWith('/a.html'))!;
+  await frame.evaluate(()=>{(window as unknown as {instance:string}).instance='same';});
+  await page.getByLabel('阅读布局',{exact:true}).selectOption('columns');
+  await page.getByRole('separator',{name:'调整侧栏宽度'}).focus();await page.keyboard.press('End');
+  await page.setViewportSize({width:760,height:1000});
+  await expect.poll(async()=>(await actionIds()).length).toBeLessThan(5);
+  const visible=await actionIds();
+  expect(visible).toEqual(order.slice(0,visible.length));
+  await expect(toolbar.getByRole('button',{name:'更多设置'})).toBeVisible();
+  await toolbar.getByRole('button',{name:'更多设置'}).click();
+  await page.screenshot({path:'test-results/toolbar-narrow.png'});
+  const overflow=page.getByRole('group',{name:'收起的工具栏操作'});
+  expect(await overflow.locator('[data-overflow-action]').evaluateAll(elements=>elements.map(element=>element.getAttribute('data-overflow-action')))).toEqual(order.slice(visible.length));
+  await overflow.getByRole('button',{name:'查看源码'}).click();
+  await expect(first.locator('.reader pre')).toContainText('<input id="draft">');
+  await toolbar.getByRole('button',{name:'更多设置'}).click();
+  await overflow.getByRole('button',{name:'返回阅读'}).click();
+  await expect(draft).toHaveValue('缩放后保留');
+  expect(await frame.evaluate(()=>(window as unknown as {instance:string}).instance)).toBe('same');
+  await toolbar.getByRole('button',{name:'更多设置'}).click();
+  await overflow.getByRole('button',{name:'复制原文'}).click();
+  expect(await page.evaluate(()=>navigator.clipboard.readText())).toContain('<input id="draft">');
+  await page.setViewportSize({width:1440,height:1000});
+  await expect.poll(actionIds).toEqual(order);
+});
+
 test('document font size persists for Markdown and text while HTML keeps its own size',async({page})=>{
   await page.getByRole('treeitem',{name:'a.md',exact:true}).click();
   const first=pane(page,0);

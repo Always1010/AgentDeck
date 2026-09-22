@@ -146,6 +146,8 @@ test('Markdown reading position survives keyboard immersion and standalone previ
   await page.keyboard.press('Escape');
   await expect(page.locator('.shell')).not.toHaveClass(/immersive/);
   await expect(page.locator('.markdown h1')).toHaveText('第一篇笔记');
+  await page.getByRole('tablist').getByRole('button',{name:'关闭页面：a.md'}).click();
+  await expect(page).toHaveURL('http://127.0.0.1:4410/');
 });
 
 test('B toggles sidebar, leaves typing alone, and preserves the current tool',async({page})=>{

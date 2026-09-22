@@ -57,7 +57,7 @@ test('temporary preview, double-click retention, open list, deduplication and re
   await expect(tab(page, 'c.html')).toHaveAttribute('aria-selected', 'true');
   await opened.getByRole('button', { name: /已打开页面/ }).click();
   await expect(opened.locator('.open-pages-list')).toHaveCount(0);
-  await page.getByRole('button', { name: '关闭预览', exact: true }).click();
+  await page.getByRole('tablist').getByRole('button', { name: '关闭页面：c.html', exact: true }).click();
   await expect(page.getByRole('tab')).toHaveCount(0);
   await expect(page.getByRole('heading', { name: '打开报告，专注阅读。' })).toBeVisible();
 });

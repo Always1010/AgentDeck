@@ -2,18 +2,22 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Entry } from '../shared/model.js';
 import { api, ApiError } from './api.js';
-import { Icon } from './Icon.js';
+import { Icon, type IconName } from './Icon.js';
 import { Markdown } from './Markdown.js';
 import { restoreFocus, shortcutFor } from './shortcuts.js';
 import { usePreference } from './preferences.js';
 import { useHtmlBridge, type HtmlKeyMode } from './useHtmlBridge.js';
 import type { BridgeAction, BridgeConfig } from '../shared/bridge.js';
 import { pagePanelId, pageTabId } from './PageTabs.js';
-export function Viewer({documentFontSize=14,keyboardActive=true,bridgeConfig,bridgeAction,focused,initialScroll,positionChanged,scope,id,active,titleChanged,tool,toggleTool,favorite,toggleFavorite,back,navigate,other}:{documentFontSize?:number;keyboardActive?:boolean;bridgeConfig?:BridgeConfig;bridgeAction?:(action:BridgeAction)=>void;focused?:()=>void;initialScroll?:{x:number;y:number};positionChanged?:(position:{x:number;y:number})=>void;scope?:string;other?:()=>void;id:string;active:boolean;titleChanged:(title:string)=>void;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;back:()=>void;navigate:(mountId:string,path:string)=>void}) {
+const toolbarActionOrder=['refresh','favorite','external','split','source','copy'] as const;
+type ToolbarAction=typeof toolbarActionOrder[number];
+export function Viewer({documentFontSize=14,keyboardActive=true,bridgeConfig,bridgeAction,focused,initialScroll,positionChanged,scope,id,active,titleChanged,tool,toggleTool,favorite,toggleFavorite,navigate,other}:{documentFontSize?:number;keyboardActive?:boolean;bridgeConfig?:BridgeConfig;bridgeAction?:(action:BridgeAction)=>void;focused?:()=>void;initialScroll?:{x:number;y:number};positionChanged?:(position:{x:number;y:number})=>void;scope?:string;other?:()=>void;id:string;active:boolean;titleChanged:(title:string)=>void;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;navigate:(mountId:string,path:string)=>void}) {
   const [entry,setEntry]=useState<Entry>();const [text,setText]=useState('');const [source,setSource]=useState(false);
   const [version,setVersion]=useState(0);const [pending,setPending]=useState('');const [error,setError]=useState('');
   const [loading,setLoading]=useState(false);const [settings,setSettings]=useState(false);const [downloadOnly,setDownloadOnly]=useState(false);
   const [copyStatus,setCopyStatus]=useState('');const [menuPosition,setMenuPosition]=useState({top:0,left:0});
+  const [visibleActions,setVisibleActions]=useState<number>(toolbarActionOrder.length);
+  const toolbarRef=useRef<HTMLElement>(null);
   const menuRef=useRef<HTMLDivElement>(null);
   const readerRef=useRef<HTMLDivElement>(null);
   const initialPosition=useRef(initialScroll);
@@ -49,10 +53,19 @@ export function Viewer({documentFontSize=14,keyboardActive=true,bridgeConfig,bri
     return()=>{disposed=true;clearInterval(timer);};
   },[id,active]);
   useEffect(()=>{if(!active)setSettings(false);},[active]);
+  useLayoutEffect(()=>{const bar=toolbarRef.current,trigger=settingsButton.current;if(!bar||!trigger)return;
+    function measure(element:HTMLElement,button:HTMLButtonElement){const style=getComputedStyle(element),gap=parseFloat(style.columnGap)||0;
+      const width=element.clientWidth-(parseFloat(style.paddingLeft)||0)-(parseFloat(style.paddingRight)||0);
+      const buttonWidth=button.offsetWidth||28;
+      setVisibleActions(Math.max(0,Math.min(toolbarActionOrder.length,Math.floor((width-88-buttonWidth-gap)/(buttonWidth+gap)))));
+    }
+    measure(bar,trigger);const observer=new ResizeObserver(()=>measure(bar,trigger));observer.observe(bar);return()=>observer.disconnect();
+  },[]);
   useLayoutEffect(()=>{if(!settings||!active)return;const button=settingsButton.current,menu=menuRef.current;if(!button||!menu)return;
-    const anchor=button.getBoundingClientRect(),height=menu.offsetHeight,width=menu.offsetWidth;
-    setMenuPosition({top:anchor.bottom+height+8>innerHeight?Math.max(8,anchor.top-height-6):anchor.bottom+6,left:Math.max(8,Math.min(innerWidth-width-8,anchor.right-width))});
-  },[settings,active,entry?.format]);
+    function position(){const anchor=button!.getBoundingClientRect(),height=menu!.offsetHeight,width=menu!.offsetWidth;
+      setMenuPosition({top:anchor.bottom+height+8>innerHeight?Math.max(8,anchor.top-height-6):anchor.bottom+6,left:Math.max(8,Math.min(innerWidth-width-8,anchor.right-width))});}
+    position();const observer=new ResizeObserver(position);if(toolbarRef.current)observer.observe(toolbarRef.current);return()=>observer.disconnect();
+  },[settings,active,entry?.format,visibleActions,source]);
   useEffect(()=>{if(!settings||!active)return;
     function outside(event:PointerEvent){const target=event.target as Node;if(!menuRef.current?.contains(target)&&!settingsButton.current?.contains(target))setSettings(false);}
     function escape(event:KeyboardEvent){if(document.querySelector('[data-workbench-dialog]')||shortcutFor(event,false,false)!=='escape')return;event.preventDefault();event.stopImmediatePropagation();setSettings(false);restoreFocus(settingsButton.current);}
@@ -65,14 +78,30 @@ export function Viewer({documentFontSize=14,keyboardActive=true,bridgeConfig,bri
   async function copyOriginal(){if(!entry)return;try{await navigator.clipboard.writeText(await read(entry));setCopyStatus('已复制原文');window.setTimeout(()=>setCopyStatus(''),2500);}catch(e){setError((e as Error).message);}}
   async function preference(patch:Partial<Entry>){try{await api(`${endpoint}/preferences`,'PATCH',patch);const e=await api<Entry>(endpoint);live.current=e;setEntry(e);}catch(e){setError((e as Error).message);}}
   const download=entry?`/api/mounts/${entry.mountId}/download?path=${encodeURIComponent(entry.relativePath)}`:'';
-  return <section className="viewer" role="tabpanel" id={pagePanelId(id,scope)} aria-labelledby={pageTabId(id,scope)} hidden={!active} inert={!active}><header className="toolbar"><div className="identity" title={entry?.relativePath}><strong>{entry?.title||'文件预览'}</strong></div><button className="icon-button" aria-label="刷新" data-tooltip="刷新文件" disabled={loading} onClick={()=>void load()}><Icon name="refresh"/></button><button className={`icon-button ${favorite?'is-favorite':''}`} aria-label={favorite?'取消收藏文件':'收藏文件'} data-tooltip={favorite?'取消收藏':'收藏'} aria-pressed={favorite} onClick={toggleFavorite}><Icon name="star" filled={favorite}/></button><a className="icon-button" aria-label="新标签" data-tooltip="在浏览器新标签中打开" href={entry&&/^html?$/.test(entry.format)?entry.previewUrl:`/preview?entry=${encodeURIComponent(id)}`} target="_blank" rel="noopener noreferrer"><Icon name="external"/></a><button className="icon-button" ref={settingsButton} aria-label="更多设置" data-tooltip="更多设置" aria-controls={`viewer-settings-${scope}`} aria-expanded={settings} onClick={()=>setSettings(!settings)}><Icon name="more"/></button><button className="icon-button" onClick={back} aria-label="关闭预览" data-tooltip="关闭当前页面"><Icon name="close"/></button></header>
-    <div className="quick-actions"><button disabled={!entry||!other} onClick={()=>{setSettings(false);other?.();}}>分屏打开</button><button disabled={!entry||downloadOnly} onClick={()=>{setSettings(false);void toggleSource();}}>{source?'返回阅读':'查看源码'}</button><button disabled={!entry||downloadOnly} onClick={()=>{setSettings(false);void copyOriginal();}}>复制原文</button><span aria-live="polite" className="sr-only">{copyStatus}</span></div>
-    {settings&&active&&createPortal(<div className="viewer-popover" ref={menuRef} id={`viewer-settings-${scope}`} data-viewer-settings data-pane={scope?.replace('pane-','')} role="group" aria-label="更多设置" style={menuPosition}>{entry&&<>
+  const actionDetails:Record<ToolbarAction,{label:string;tip:string;icon:IconName;disabled?:boolean;pressed?:boolean;href?:string;run?:()=>void;menuLabel?:string}>={
+    refresh:{label:'刷新',tip:'刷新当前文件',icon:'refresh',disabled:loading,run:()=>void load()},
+    favorite:{label:favorite?'取消收藏文件':'收藏文件',tip:favorite?'取消收藏':'收藏文件',icon:'star',pressed:favorite,run:toggleFavorite},
+    external:{label:'新标签',menuLabel:'在浏览器新标签页打开',tip:'在浏览器新标签页打开',icon:'external',href:entry&&/^html?$/.test(entry.format)?entry.previewUrl:`/preview?entry=${encodeURIComponent(id)}`},
+    split:{label:'分屏打开',tip:'在另一阅读区打开',icon:'split',disabled:!entry||!other,run:()=>other?.()},
+    source:{label:source?'返回阅读':'查看源码',tip:source?'返回阅读':'查看文件源码',icon:source?'book':'code',disabled:!entry||downloadOnly,run:()=>void toggleSource()},
+    copy:{label:'复制原文',tip:'复制文件原文',icon:'copy',disabled:!entry||downloadOnly,run:()=>void copyOriginal()},
+  };
+  function renderAction(action:ToolbarAction,inMenu:boolean){const detail=actionDetails[action];const content=inMenu?detail.menuLabel||detail.label:<Icon name={detail.icon} filled={action==='favorite'&&favorite}/>;
+    if(detail.href)return <a key={action} className={inMenu?undefined:'icon-button'} data-toolbar-action={inMenu?undefined:action} data-overflow-action={inMenu?action:undefined} aria-label={inMenu?detail.menuLabel||detail.label:detail.label} data-tooltip={inMenu?undefined:detail.tip} href={detail.href} target="_blank" rel="noopener noreferrer" onClick={()=>{if(inMenu)setSettings(false);}}>{content}</a>;
+    return <button key={action} className={inMenu?undefined:`icon-button ${action==='favorite'&&favorite?'is-favorite':''}`} data-toolbar-action={inMenu?undefined:action} data-overflow-action={inMenu?action:undefined} aria-label={detail.label} data-tooltip={inMenu?undefined:detail.tip} aria-pressed={detail.pressed} disabled={detail.disabled} onClick={()=>{if(inMenu)setSettings(false);detail.run?.();}}>{content}</button>;
+  }
+  return <section className="viewer" role="tabpanel" id={pagePanelId(id,scope)} aria-labelledby={pageTabId(id,scope)} hidden={!active} inert={!active}><header className="toolbar" ref={toolbarRef}><div className="identity" title={entry?.relativePath}><strong>{entry?.title||'文件预览'}</strong></div>{toolbarActionOrder.slice(0,visibleActions).map(action=>renderAction(action,false))}<button className="icon-button" ref={settingsButton} aria-label="更多设置" data-tooltip="更多操作与设置" aria-controls={`viewer-settings-${scope}`} aria-expanded={settings} onClick={()=>setSettings(!settings)}><Icon name="more"/></button></header>
+    <span aria-live="polite" className="sr-only">{copyStatus}</span>
+    {settings&&active&&createPortal(<div className="viewer-popover" ref={menuRef} id={`viewer-settings-${scope}`} data-viewer-settings data-pane={scope?.replace('pane-','')} role="group" aria-label="更多设置" style={menuPosition}>
+      {visibleActions<toolbarActionOrder.length&&<div className="viewer-overflow-actions" role="group" aria-label="收起的工具栏操作">{toolbarActionOrder.slice(visibleActions).map(action=>renderAction(action,true))}</div>}
+      {entry&&<>
+      <div className="viewer-menu-secondary">
       {/^html?$/.test(entry.format)&&<button aria-pressed={tool} onClick={()=>{setSettings(false);toggleTool();}}><Icon name="tool"/>{tool?'从工具移除':'添加到工具'}</button>}
       {!/^html?$/.test(entry.format)&&!downloadOnly&&<label className="inline"><input type="checkbox" checked={entry.refreshMode==='auto'} onChange={e=>{setSettings(false);void preference({refreshMode:e.target.checked?'auto':'prompt'});}}/>自动更新文本</label>}
       <button onClick={()=>{setSettings(false);const title=prompt('显示名称',entry.title);if(title)void preference({title});}}>显示名称</button><a href={download} download onClick={()=>setSettings(false)}>下载原文件</a>
       {/^html?$/.test(entry.format)&&<label className="menu-select">此 HTML 快捷键<select value={keyOverride} onChange={event=>{setKeyOverride(event.target.value as 'inherit'|HtmlKeyMode);setSettings(false);}}><option value="inherit">跟随全局设置</option><option value="web">网页优先</option><option value="workbench">工作台优先</option></select></label>}
       <span className="muted">{entry.relativePath}</span>
+      </div>
     </>}</div>,document.body)}
     {entry&&/^html?$/.test(entry.format)&&active&&!source&&<div className="bridge-state" data-bridge-status={bridge.status} aria-live="polite">{effectiveConfig.mode==='web'?'网页快捷键优先':bridge.status==='ready'?'工作台快捷键优先':bridge.status==='waiting'?'正在连接页面快捷键…':'当前页面未接管快捷键，可使用工作台按钮'}</div>}
     {pending&&<div className="notice" role="status">{pending}<button onClick={()=>void load()}>加载更新</button><button onClick={()=>setPending('')}>稍后</button></div>}
