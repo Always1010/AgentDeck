@@ -1,0 +1,89 @@
+/* Shared colors for the workbench. User report styles are independent. */
+:root{
+  --background:#f3f5f8;
+  --surface:#fff;
+  --surface-alt:#f7f9fb;
+  --surface-soft:#f0f4f8;
+  --hover:#edf3f6;
+  --text:#233246;
+  --heading:#263e50;
+  --muted:#617586;
+  --subtle:#758697;
+  --border:#e0e6ec;
+  --border-strong:#cbd5e1;
+  --accent:#176b88;
+  --primary:#186a83;
+  --primary-hover:#12566c;
+  --focus:#4295b0;
+  --accent-border:#94b9c7;
+  --selection:#e0edf7;
+  --selection-text:#164b70;
+  --accent-soft:#f0f6f8;
+  --error:#a6362a;
+  --error-bg:#fff0ec;
+  --error-hover:#fceaea;
+  --error-border:#efcaca;
+  --warning:#996919;
+  --warning-bg:#fff5dc;
+  --warning-hover:#fff1d5;
+  --warning-border:#e9d8b7;
+  --success:#327450;
+  --success-bg:#e9f5ef;
+  --success-hover:#e6f4eb;
+  --success-border:#bcd9c6;
+  --star:#ad8743;
+  --html-icon:#b37546;
+  --markdown-icon:#587ca7;
+  --overlay:#172c4666;
+  --shadow:#0003;
+  --tooltip-bg:#243747;
+  --tooltip-text:#fff;
+  --on-accent:#fff;
+}
+:root[data-theme="dark"]{
+  --background:#101820;
+  --surface:#17212b;
+  --surface-alt:#1c2935;
+  --surface-soft:#202f3c;
+  --hover:#253848;
+  --text:#dce6ef;
+  --heading:#edf5fa;
+  --muted:#a6b6c5;
+  --subtle:#98abbb;
+  --border:#354859;
+  --border-strong:#526a7d;
+  --accent:#7bc6dc;
+  --primary:#216e87;
+  --primary-hover:#2b839e;
+  --focus:#85d4ea;
+  --accent-border:#557f95;
+  --selection:#23475d;
+  --selection-text:#ccefff;
+  --accent-soft:#1c3543;
+  --error:#ffb4aa;
+  --error-bg:#3a2427;
+  --error-hover:#4b2d31;
+  --error-border:#875057;
+  --warning:#edc786;
+  --warning-bg:#39301f;
+  --warning-hover:#4a3b24;
+  --warning-border:#6a5737;
+  --success:#9ed9b5;
+  --success-bg:#1c352b;
+  --success-hover:#274737;
+  --success-border:#365f4d;
+  --star:#e6bc6b;
+  --html-icon:#e0aa7a;
+  --markdown-icon:#98bce7;
+  --overlay:#050a10b3;
+  --shadow:#0008;
+  --tooltip-bg:#dce6ef;
+  --tooltip-text:#17212b;
+  --on-accent:#fff;
+}
+
+.theme-picker{display:flex;align-items:center;gap:5px;margin:0 4px;font-size:11px;color:var(--muted)}
+.theme-picker select{margin:0;width:90px;height:27px;padding:2px 5px;font-size:12px;border-color:var(--border);background:var(--surface);color:var(--text)}
+:root{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+@media(max-width:640px){.theme-picker{margin:0}.theme-picker>span,.workspace-header kbd{display:none}.theme-picker select{width:80px}.workspace-actions .immersion-toggle>span{display:none}.workspace-actions .immersion-toggle{padding:3px 6px}.workspace-header .sidebar-toggle{padding:3px 6px}}
+@media(max-width:360px){.workspace-header .brand{display:none}}
