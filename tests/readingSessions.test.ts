@@ -187,3 +187,54 @@ test('storage access failures are surfaced without creating an empty replacement
   expect(env.owners.size).toBe(0);
 });
 
+test('a previous owner final commit between lookup and lock acquisition is hydrated before automatic saving', async () => {
+  let record: unknown = { id: 'same', updatedAt: 1, activeAt: 1, snapshot: snapshot('old') };
+  let released = false;
+  const manager = createReadingSessionManager({
+    store: {
+      get: async () => structuredClone(record),
+      list: async () => [structuredClone(record)],
+      put: async next => { record = structuredClone(next); },
+    },
+    supportsOwnership: true,
+    claim: async () => {
+      // Model the former owner's final durable write and release after our first read.
+      record = { id: 'same', updatedAt: 2, activeAt: 2, snapshot: snapshot('newest') };
+      return () => { released = true; };
+    },
+    newId: () => 'copy',
+    now: () => 3,
+  });
+  const session = await manager.openReadingSession('same');
+  expect(session.snapshot?.workspace.panes[0].active).toBe('newest');
+  await session.save(session.snapshot!);
+  expect((record as any).snapshot.workspace.panes[0].active).toBe('newest');
+  session.close();
+  await Promise.resolve();
+  expect(released).toBe(true);
+});
+
+test('corruption or read failure discovered after lock acquisition releases ownership without writing', async () => {
+  for (const failRead of [false, true]) {
+    let claimed = false, released = false, writes = 0;
+    const good = { id: 'same', updatedAt: 1, activeAt: 1, snapshot: snapshot('good') };
+    const manager = createReadingSessionManager({
+      store: {
+        get: async () => {
+          if (claimed && failRead) throw new Error('read failure');
+          return claimed ? { ...good, snapshot: {} } : good;
+        },
+        list: async () => [good],
+        put: async () => { writes++; },
+      },
+      supportsOwnership: true,
+      claim: async () => { claimed = true; return () => { released = true; }; },
+      newId: () => 'copy',
+      now: () => 3,
+    });
+    await expect(manager.openReadingSession('same')).rejects.toThrow(failRead ? 'read failure' : '原记录已保留');
+    expect(released).toBe(true);
+    expect(writes).toBe(0);
+  }
+});
+

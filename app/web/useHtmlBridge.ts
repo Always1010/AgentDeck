@@ -22,7 +22,12 @@ export function useHtmlBridge({ url, version, config, action, focus, position, p
   function post(type: string, fields = {}) {
     if (origin) frame.current?.contentWindow?.postMessage({ marker: BRIDGE_MARKER, version: BRIDGE_VERSION, session: session.current, type, ...fields }, origin);
   }
-  function configure() { if (session.current) post('config', { config: live.current.config }); }
+  function restorePosition() {
+    if (loaded.current && session.current && live.current.config.active && !restored.current && live.current.position) {
+      restored.current = true; post('restore-scroll', live.current.position);
+    }
+  }
+  function configure() { if (session.current) { post('config', { config: live.current.config }); restorePosition(); } }
   function probe() {
     session.current = ''; setStatus('waiting'); clearTimeout(timer.current);
     post('probe');
@@ -37,9 +42,7 @@ export function useHtmlBridge({ url, version, config, action, focus, position, p
       if (!data || data.marker !== BRIDGE_MARKER || data.version !== BRIDGE_VERSION || typeof data.session !== 'string' || !data.session || data.session.length > 100) return;
       if (data.type === 'ready') {
         session.current = data.session; clearTimeout(timer.current); setStatus('ready'); configure();
-        if (loaded.current && !restored.current && live.current.position) {
-          restored.current = true; post('restore-scroll', live.current.position);
-        }
+        restorePosition();
         return;
       }
       if (data.session !== session.current || !live.current.config.active) return;

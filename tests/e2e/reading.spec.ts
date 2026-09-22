@@ -316,7 +316,7 @@ test('document font size persists for Markdown and text while HTML keeps its own
   await settings.getByRole('button',{name:'关闭设置'}).click();
   await page.reload();
   await expect(first.locator('.reader')).toHaveCSS('font-size','24px');
-  if (!await page.getByRole('treeitem',{name:'a.txt',exact:true}).isVisible()) await page.getByRole('treeitem',{name:'阅读验证',exact:true}).click();
+  await expect(page.getByRole('treeitem',{name:'阅读验证',exact:true})).toHaveAttribute('aria-expanded','true');
   await page.getByRole('treeitem',{name:'a.txt',exact:true}).click();
   await expect(first.locator('.viewer:not([hidden]) .reader')).toHaveCSS('font-size','24px');
   await expect(first.locator('.viewer:not([hidden]) pre')).toHaveCSS('font-size','24px');

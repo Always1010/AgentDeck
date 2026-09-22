@@ -99,16 +99,18 @@ function summary(record: SavedReadingSession): ReadingSessionSummary {
 /** Dependency boundary lets ownership, transaction failures and write ordering be tested without a browser. */
 export function createReadingSessionManager(dependencies: Dependencies) {
   const { store } = dependencies;
+  async function read(id: string): Promise<SavedReadingSession | null> {
+    const record = await store.get(id);
+    if (record !== null && (!isSaved(record) || record.id !== id)) throw new Error('保存的阅读现场无法读取，原记录已保留。');
+    return record;
+  }
   async function listReadingSessions(): Promise<ReadingSessionSummary[]> {
     return (await store.list()).filter(isSaved).sort(mostRecent).map(summary);
   }
   async function openReadingSession(requestedId?: string): Promise<ReadingSession> {
     let source: SavedReadingSession | null = null;
-    if (requestedId) {
-      const record = await store.get(requestedId);
-      if (record !== null && (!isSaved(record) || record.id !== requestedId)) throw new Error('保存的阅读现场无法读取，原记录已保留。');
-      source = record;
-    } else source = (await store.list()).filter(isSaved).sort(mostRecent)[0] || null;
+    if (requestedId) source = await read(requestedId);
+    else source = (await store.list()).filter(isSaved).sort(mostRecent)[0] || null;
     let id = requestedId || source?.id || dependencies.newId();
     let release: (() => void) | null = null;
     if (dependencies.supportsOwnership) release = await dependencies.claim(id);
@@ -119,16 +121,21 @@ export function createReadingSessionManager(dependencies: Dependencies) {
         release = dependencies.supportsOwnership ? await dependencies.claim(id) : () => undefined;
       } while (!release);
     }
-    let snapshot = source ? structuredClone(source.snapshot) : null;
-    let activeAt = source?.activeAt || 0;
-    let closed = false;
-    let queue = Promise.resolve();
+    let snapshot: ReadingSnapshot | null;
+    let activeAt: number;
     try {
+      // The former owner can finish a final transaction between our initial read and lock acquisition.
+      // Read again under the lock before hydration can auto-save and overwrite that newer transaction.
+      if (dependencies.supportsOwnership && (id === requestedId || id === source?.id)) source = await read(id);
+      snapshot = source ? structuredClone(source.snapshot) : null;
+      activeAt = source?.activeAt || 0;
       if (source && id !== source.id) {
         const now = dependencies.now();
         await store.put({ id, updatedAt: now, activeAt, snapshot: snapshot! });
       }
     } catch (error) { release(); throw error; }
+    let closed = false;
+    let queue = Promise.resolve();
     const session: ReadingSession = {
       id,
       snapshot,

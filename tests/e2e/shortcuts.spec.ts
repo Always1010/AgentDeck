@@ -77,7 +77,8 @@ test('immersive search is temporary and list arrows do not replace a live tool',
   await expect(page.locator('.markdown h1')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('.explorer')).toBeHidden();
-  expect(await page.evaluate(() => localStorage.getItem('explorer.collapsed'))).toBe('true');
+  await page.reload();
+  await expect(page.locator('.explorer')).toBeHidden();
 });
 
 test('form input, composition and modified shortcuts remain unhandled', async ({ page }) => {
@@ -147,7 +148,9 @@ test('Markdown reading position survives keyboard immersion and standalone previ
   await expect(page.locator('.shell')).not.toHaveClass(/immersive/);
   await expect(page.locator('.markdown h1')).toHaveText('第一篇笔记');
   await page.getByRole('tablist').getByRole('button',{name:'关闭页面：a.md'}).click();
-  await expect(page).toHaveURL('http://127.0.0.1:4410/');
+  await expect(page.locator('.reading-pane')).toHaveCount(1);
+  await expect(page.getByRole('tab')).toHaveCount(0);
+  await expect(page.getByRole('heading',{name:'打开报告，专注阅读。'})).toBeVisible();
 });
 
 test('B toggles sidebar, leaves typing alone, and preserves the current tool',async({page})=>{

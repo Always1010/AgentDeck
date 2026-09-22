@@ -192,3 +192,13 @@
 - 解决方案：将六项常用操作改为单行图标并固定“更多”；通过 ResizeObserver 按当前工具栏宽度从右向左收纳，浮层中保持原操作顺序。每个图标提供悬浮提示与可访问名称；关闭文档使用标签页上的入口。
 - 验证：浏览器测试覆盖宽屏七图标、窄屏收纳顺序、浮层中的源码切换和复制、提示显示、HTML 输入和实例保留，以及标签关闭。
 - 相关文件：app/web/Viewer.tsx、app/web/Icon.tsx、app/web/App.tsx、app/web/style.css、tests/e2e/reading.spec.ts、tests/e2e/pages.spec.ts、tests/e2e/shortcuts.spec.ts。
+
+## AD-020 — 刷新或关闭浏览器后丢失阅读现场，多个页面共用布局偏好
+
+- 日期：2026-09-22
+- 状态：已解决
+- 现象：刷新或重新打开工作台后，打开的文件标签、固定状态、区域历史和阅读位置丢失；布局方向和比例采用跨标签共享偏好，多个工作台页面无法独立保存现场。
+- 原因：阅读区及标签仅保存在 React 内存状态中，滚动位置仅存于 ref；通用 localStorage 偏好监听 storage 事件，将布局同步到其他页面。仅保存当前 entry 地址不能重建完整现场。
+- 解决方案：每个浏览器标签绑定独立现场 ID，通过 IndexedDB 事务保存布局树、区域标签与历史、显示状态、目录展开和可获取的文档滚动位置。URL 携带现场 ID，刷新及原地址重开恢复；活动现场重复打开时复制为独立副本，Web Locks 保证单一写入者。取得旧现场写入权后重新读取最新快照，避免关闭与重开竞态覆盖最后保存。初始化先校验再启用保存，写入失败保留原快照并提示。隐藏区域在首次可见时恢复滚动，避免最大化状态刷新后位置归零。设置提供最近现场恢复入口。
+- 验证：单元测试覆盖快照校验、串行保存、失败重试、所有权交接竞态、前台最近使用与无锁降级；真实浏览器覆盖混合分屏刷新、比例与固定标签、历史与滚动恢复、多页面复制隔离、关闭重开、HTML 隐藏区域恢复、最近现场、指定文件链接及存储不可用降级。完整回归与复验结果记录在 docs/TEST-RESULTS.md。
+- 相关文件：app/web/readingSessions.ts、app/web/useReadingPersistence.ts、app/web/RecentReadingSessions.tsx、app/web/App.tsx、app/web/Tree.tsx、app/web/Settings.tsx、app/web/Viewer.tsx、app/web/useHtmlBridge.ts、tests/readingSessions.test.ts、tests/e2e/sessions.spec.ts。

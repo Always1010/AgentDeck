@@ -5,14 +5,14 @@ import { FileOpenMenu } from './FileOpenMenu.js';
 import { fileTypeVisible, type FileTypeFilter } from './fileExtensions.js';
 
 type Listing = { items?: TreeItem[]; error?: string; loading?: boolean };
-type Props = { mount: Mount; label: string; query: string; typeFilter: FileTypeFilter; selected: string; favorites: string[]; refresh: number; open: (id: string, keep?: boolean) => void; internal: (id: string) => void; browserUrl: (id: string) => string | undefined; other?: (id: string) => void; favorite: (id: string) => void; discovered: (mount: Mount, items: TreeItem[]) => void; manage?: () => void };
+type Props = { initialExpanded?: string[]; expansionChanged?: (paths:string[])=>void; mount: Mount; label: string; query: string; typeFilter: FileTypeFilter; selected: string; favorites: string[]; refresh: number; open: (id: string, keep?: boolean) => void; internal: (id: string) => void; browserUrl: (id: string) => string | undefined; other?: (id: string) => void; favorite: (id: string) => void; discovered: (mount: Mount, items: TreeItem[]) => void; manage?: () => void };
 export function FileIcon({name}:{name:string}) {
   const ext = name.split('.').pop()?.toLowerCase();
   const kind = /^(html?|md|markdown|csv)$/.test(ext || '') ? ext : 'file';
   return <span aria-hidden="true" className={`file-icon icon-${kind}`}>{/^html?$/.test(ext || '') ? 'H' : /^(md|markdown)$/.test(ext || '') ? 'M' : ext === 'csv' ? 'C' : '≡'}</span>;
 }
-export function Tree({mount,label,query,typeFilter,selected,favorites,refresh,open,internal,browserUrl,other,favorite,discovered,manage}:Props) {
-  const [expanded,setExpanded] = useState<Set<string>>(new Set());
+export function Tree({initialExpanded,expansionChanged,mount,label,query,typeFilter,selected,favorites,refresh,open,internal,browserUrl,other,favorite,discovered,manage}:Props) {
+  const [expanded,setExpanded] = useState<Set<string>>(()=>new Set(initialExpanded||[]));
   const [cache,setCache] = useState<Record<string,Listing>>({});
   const live = useRef({expanded,mount,discovered}); live.current = {expanded,mount,discovered};
   const generation = useRef(0); const pending = useRef(new Set<string>());
@@ -41,7 +41,7 @@ export function Tree({mount,label,query,typeFilter,selected,favorites,refresh,op
   function toggle(path:string) {
     const next = new Set(expanded);
     if(next.has(path)) next.delete(path); else {next.add(path);if(!cache[path]?.items || cache[path]?.error)void load(path);}
-    setExpanded(next);
+    setExpanded(next);expansionChanged?.([...next]);
   }
   const term=query.trim().toLowerCase();
   function matches(item:TreeItem):boolean {if(!item.directory&&!fileTypeVisible(item.name,typeFilter))return false;return item.name.toLowerCase().includes(term) || item.relativePath.toLowerCase().includes(term) || !!(item.directory && cache[item.relativePath]?.items?.some(matches));}

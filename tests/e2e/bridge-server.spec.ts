@@ -25,6 +25,8 @@ test('injected bridge intercepts before page handlers, preserves editors, and ro
       return data.mounts.find((m: { projectId: string }) => m.projectId === projectId).id as string;
     }, projectId);
     const url = `http://127.0.0.1:4411/m/${mountId}/probe.html`;
+    await expect(page.locator('.shell')).toBeVisible();
+    const workbenchUrl = page.url();
     // A minimal host on the real workbench origin exercises the server contract independently of React UI.
     await page.evaluate(url => {
       document.body.innerHTML = '<iframe id="bridge-probe" style="width:800px;height:600px"></iframe>';
@@ -54,7 +56,7 @@ test('injected bridge intercepts before page handlers, preserves editors, and ro
     await frame.locator('#draft').press('Alt+ArrowLeft');
     await expect.poll(() => page.evaluate(() => (window as any).bridgeMessages.some((m: any) => m.action === 'back'))).toBe(true);
     expect(await child.evaluate(() => (window as any).pageReleases)).not.toContain('ArrowLeft');
-    expect(page.url()).toBe('http://127.0.0.1:4410/');
+    expect(page.url()).toBe(workbenchUrl);
     await page.evaluate(() => { (window as any).bridgeConfig.mode = 'web'; (window as any).configureBridge(); });
     const releasesBefore = await child.evaluate(() => (window as any).pageReleases.filter((key: string) => key === 'f').length);
     await frame.locator('body').click({ position: { x: 600, y: 300 } }); await page.keyboard.press('f');
