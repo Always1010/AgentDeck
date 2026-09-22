@@ -16,6 +16,6 @@ export function Markdown({text,entry,previewOrigin,navigate}:{text:string;entry:
   const heading=(Tag:'h1'|'h2'|'h3'|'h4'|'h5'|'h6')=>({children}:{children?:ReactNode})=><Tag id={prefixId+plain(children).toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu,'').trim().replace(/\s+/g,'-')}>{children}</Tag>;
   return <article ref={article} className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml urlTransform={url} components={{h1:heading('h1'),h2:heading('h2'),h3:heading('h3'),h4:heading('h4'),h5:heading('h5'),h6:heading('h6'),a:({href,children})=>{
     if(href?.startsWith('#'))return <a href={href} onClick={e=>{e.preventDefault();try{article.current?.querySelector(`#${CSS.escape(prefixId+decodeURIComponent(href.slice(1)))}`)?.scrollIntoView();}catch{/* Invalid fragment does not interrupt reading. */}}}>{children}</a>;
-    const local=href?.startsWith(previewOrigin+prefix);return <a href={href||undefined} target="_blank" rel="noopener noreferrer" onClick={e=>{if(local&&href&&/\.(md|markdown|txt|csv|json)(?:[?#]|$)/i.test(href)){e.preventDefault();navigate(decodeURIComponent(new URL(href).pathname.slice(prefix.length)));}}}>{children}</a>;
+    const local=href?.startsWith(previewOrigin+prefix);return <a href={href||undefined} target="_blank" rel="noopener noreferrer" onClick={e=>{if(local&&href&&/\.(html?|md|markdown|txt|csv|json)(?:[?#]|$)/i.test(href)){e.preventDefault();navigate(decodeURIComponent(new URL(href).pathname.slice(prefix.length)));}}}>{children}</a>;
   }}}>{text}</ReactMarkdown></article>;
 }

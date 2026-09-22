@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState, type CSSProperties } from 'react';
-import { fileReference, parseFileReference, type Mount, type Snapshot, type TreeItem, type ToolItem } from '../shared/model.js';
+import { fileReference, parseFileReference, previewPath, type Mount, type Snapshot, type TreeItem, type ToolItem } from '../shared/model.js';
 import { Management } from './Management.js';
 import { Tree, FileIcon } from './Tree.js';
 import { ToolPicker } from './ToolPicker.js';
@@ -13,6 +13,8 @@ import { initialPages, pagesReducer } from './pages.js';
 import { OpenPages, PageTabs, pageTabId } from './PageTabs.js';
 import { ThemePicker } from './Theme.js';
 import { isEditing, restoreFocus, shortcutFor } from './shortcuts.js';
+import { Settings, isHtmlOpening, type HtmlOpening } from './Settings.js';
+import { FileOpenMenu } from './FileOpenMenu.js';
 import './style.css';
 import './theme.css';
 const empty:Snapshot={projects:[],mounts:[],revision:0};
@@ -37,6 +39,12 @@ export function App() {
   const [collapsed,setCollapsed]=usePreference('explorer.collapsed',false,isBoolean);
   const [width,setWidth]=usePreference('explorer.width',280,(v):v is number=>typeof v==='number'&&Number.isFinite(v)&&v>=200&&v<=440);
   const [shortcutsEnabled,setShortcutsEnabled]=usePreference('shortcuts.enabled',true,isBoolean);
+  const [htmlOpening,setHtmlOpening]=usePreference<HtmlOpening>('html.opening','workbench',isHtmlOpening);
+  const [previewOrigin,setPreviewOrigin]=useState('');
+  const [settingsPage,setSettingsPage]=useState(location.hash==='#settings');
+  useEffect(()=>{const changed=()=>setSettingsPage(location.hash==='#settings');window.addEventListener('hashchange',changed);return()=>window.removeEventListener('hashchange',changed);},[]);
+  function closeSettings(){history.replaceState(null,'',location.pathname+location.search);setSettingsPage(false);}
+  useEffect(()=>{void api<{previewOrigin:string}>('/api/status').then(status=>setPreviewOrigin(status.previewOrigin)).catch(()=>setError('无法获取 HTML 预览地址，请刷新工作台。'));},[]);
   const [help,setHelp]=useState(false);
   const [guide,setGuide]=useState(false);
   const [searchActive,setSearchActive]=useState(false);
@@ -83,6 +91,16 @@ export function App() {
   function favorite(id:string){const next=favoritesRef.current.includes(id)?favoritesRef.current.filter(x=>x!==id):[...favoritesRef.current,id];favoritesRef.current=next;setFavorites(next);}
   function finishSearch(cancel=true){if(cancel&&searchRestore.current)setQuery(searchRestore.current.query);setSearchActive(false);restoreFocus(cancel?searchRestore.current?.focus||null:immersionRef.current,immersionRef.current);searchRestore.current=null;}
   function open(id:string,keep=false){dispatchPages({type:'open',id:aliasesRef.current[id]||id,keep});if(searchActive)finishSearch(false);if(matchMedia('(max-width: 640px)').matches)setCollapsed(true);}
+  function browserUrl(id:string){const ref=parseFileReference(aliasesRef.current[id]||id);return ref&&previewOrigin?previewOrigin+previewPath(ref.mountId,ref.relativePath):undefined;}
+  function openFile(id:string,keep=false){
+    const path=parseFileReference(aliasesRef.current[id]||id)?.relativePath||'';
+    if(htmlOpening==='browser'&&/\.html?$/i.test(path)){
+      if(keep)return;
+      const url=browserUrl(id);if(url)window.open(url,'_blank','noopener,noreferrer');else setError('HTML 预览地址尚未就绪，请稍后重试。');
+      return;
+    }
+    open(id,keep);
+  }
   function keepPage(id:string){dispatchPages({type:'keep',id:aliasesRef.current[id]||id});}
   function closePage(id:string){
     const next=pagesReducer(pages,{type:'close',id});dispatchPages({type:'close',id});
@@ -107,11 +125,12 @@ export function App() {
   function resize(value:number){setWidth(Math.max(200,Math.min(440,value)));}
   const hidden=!searchActive&&(immersive||collapsed);
   const refs=(view==='tools'?tools:favorites.map(id=>({id,title:''}))).map(({id,title})=>({id,title,ref:parseFileReference(id)})).filter(({id,title,ref})=>`${title} ${ref?.relativePath||id} ${data.mounts.find(m=>m.id===ref?.mountId)?.label||''}`.toLowerCase().includes(query.trim().toLowerCase()));
-  return <div className={`shell ${hidden?'sidebar-hidden':''} ${immersive?'immersive':''}`} style={{'--sidebar-width':`${width}px`} as CSSProperties}>
+  return <><div inert={settingsPage} className={`shell ${hidden?'sidebar-hidden':''} ${immersive?'immersive':''}`} style={{'--sidebar-width':`${width}px`} as CSSProperties}>
     <header className="workspace-header"><button ref={sidebarRef} className="sidebar-toggle" aria-keyshortcuts={shortcutsEnabled?'b':undefined} title={`${hidden?'展开文件侧栏':'收起文件侧栏'}${shortcutsEnabled?' · B（工作台获得焦点时）':''}`} aria-label={hidden?'展开文件侧栏':'收起文件侧栏'} aria-expanded={!hidden} onClick={toggleSidebar}><Icon name="sidebar"/>{shortcutsEnabled&&<kbd aria-hidden="true">B</kbd>}</button><strong className="brand">AgentDeck</strong><span className="workspace-context">本地文件工作台</span><div className="workspace-actions">
       {searchActive&&<button onClick={()=>finishSearch()}>结束筛选</button>}
       <button ref={immersionRef} className="immersion-toggle" disabled={!selected&&!immersive} aria-label={immersive?'退出沉浸':'沉浸'} aria-pressed={immersive} aria-keyshortcuts={shortcutsEnabled?'f':undefined} title={`${immersive?'退出沉浸':'沉浸阅读'}${shortcutsEnabled?' · F（工作台获得焦点时）':''}`} onClick={toggleImmersion}><Icon name={immersive?'collapse':'expand'}/><span>{immersive?'退出沉浸':'沉浸'}</span>{shortcutsEnabled&&<kbd aria-hidden="true">F</kbd>}</button>
       <ThemePicker/>
+      <button aria-label="设置" onClick={()=>{location.hash='settings';setSettingsPage(true);}}>设置</button>
       <button aria-label="使用帮助" onClick={()=>setGuide(true)}>使用帮助</button>
       <button aria-label="快捷键" title="快捷键" onClick={()=>setHelp(true)}>?</button>
     </div></header>
@@ -128,25 +147,25 @@ export function App() {
           const mounts=data.mounts.filter(m=>m.projectId===project.id);
           return <div className="project-group" key={project.id}>
             {mounts.length!==1&&<div className="project-heading"><span>{project.name}</span><button aria-label={`管理项目：${project.name}`} onClick={()=>setManage(project.id)}>⋯</button></div>}
-            {mounts.map(m=><Tree key={m.id} mount={m} label={mounts.length===1?project.name:m.label} query={query} selected={selected} favorites={favorites} refresh={refresh} open={open} favorite={favorite} discovered={discovered} manage={mounts.length===1?()=>setManage(project.id):undefined}/>)}
+            {mounts.map(m=><Tree key={m.id} mount={m} label={mounts.length===1?project.name:m.label} query={query} selected={selected} favorites={favorites} refresh={refresh} open={openFile} internal={open} browserUrl={browserUrl} favorite={favorite} discovered={discovered} manage={mounts.length===1?()=>setManage(project.id):undefined}/>)}
             {!mounts.length&&<p className="tree-message">尚未挂载目录</p>}
           </div>;
         })}{!data.projects.length&&<div className="catalog-empty"><p>挂载目录后，展开文件夹开始浏览。</p><button onClick={()=>setManage('new')}>添加项目</button></div>}</div>
         {view!=='files'&&<>{refs.map(({id,title,ref})=>{
           const mount=data.mounts.find(m=>m.id===ref?.mountId);const name=title||ref?.relativePath.split('/').pop()||'旧收藏（展开原目录后恢复）';
-          return <div className={`file-row ${id===selected?'selected':''}`} key={id}><button className="node-main" role="treeitem" aria-selected={id===selected} title={ref?`${mount?.label||'挂载不可用'} / ${ref.relativePath}${favoriteErrors[id]?' · '+favoriteErrors[id]:''}`:id} onClick={()=>open(id)} onDoubleClick={()=>open(id,true)}>{view==='tools'?<Icon name="tool"/>:<FileIcon name={name}/>}<span className="filename">{name}</span>{ref&&(!mount||!mount.enabled||favoriteErrors[id])&&<span className="node-status">不可用</span>}</button><button className={`row-action ${view==='tools'?'':'starred'}`} aria-label={`${view==='tools'?'移除工具':'取消收藏'}：${name}`} title={view==='tools'?'从工具列表移除，原文件保留':'取消收藏'} onClick={()=>view==='tools'?void changeTool(id,true):favorite(id)}>{view==='tools'?<Icon name="close"/>:'★'}</button></div>;
+          return <div className={`file-row ${id===selected?'selected':''}`} key={id}><button className="node-main" role="treeitem" aria-selected={id===selected} title={ref?`${mount?.label||'挂载不可用'} / ${ref.relativePath}${favoriteErrors[id]?' · '+favoriteErrors[id]:''}`:id} onClick={event=>{if(event.detail<=1)openFile(id);}} onDoubleClick={()=>openFile(id,true)}>{view==='tools'?<Icon name="tool"/>:<FileIcon name={name}/>}<span className="filename">{name}</span>{ref&&(!mount||!mount.enabled||favoriteErrors[id])&&<span className="node-status">不可用</span>}</button>{/\.html?$/i.test(ref?.relativePath||'')&&<FileOpenMenu name={name} url={browserUrl(id)} internal={()=>open(id)}/>}<button className={`row-action ${view==='tools'?'':'starred'}`} aria-label={`${view==='tools'?'移除工具':'取消收藏'}：${name}`} title={view==='tools'?'从工具列表移除，原文件保留':'取消收藏'} onClick={()=>view==='tools'?void changeTool(id,true):favorite(id)}>{view==='tools'?<Icon name="close"/>:'★'}</button></div>;
         })}{!refs.length&&<p className="tree-message">{query?'没有匹配的文件':view==='tools'?'点击上方＋添加 HTML，或在预览的更多菜单中加入工具。':'点击文件旁的星标，收藏常用文件。'}</p>}</>}
       </div><div className="explorer-footer">{view==='tools'?'常用 HTML 工具 · 原文件只读':view==='favorites'?'常用文件收藏':query?'仅筛选已加载的目录和文件':'按需展开 · 原文件只读'}</div>
     </aside>
     <div className="catalog-resizer" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" aria-valuemin={200} aria-valuemax={440} aria-valuenow={width} tabIndex={hidden?-1:0} onPointerDown={e=>{if(e.button!==0)return;drag.current={x:e.clientX,width};e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(drag.current)resize(drag.current.width+e.clientX-drag.current.x);}} onPointerUp={e=>{drag.current=null;if(e.currentTarget.hasPointerCapture(e.pointerId))e.currentTarget.releasePointerCapture(e.pointerId);}} onLostPointerCapture={()=>{drag.current=null;}} onKeyDown={e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();resize(e.key==='Home'?200:e.key==='End'?440:width+(e.key==='ArrowLeft'?-10:10));}}}/>
     <main className="workspace-pages">
       {!!pages.items.length&&<PageTabs pages={pages.items} active={selected} snapshot={data} open={open} keep={keepPage} close={closePage}/>}
-      {pages.items.length?pages.items.map(page=><Viewer key={page.id} id={page.id} active={page.id===selected} titleChanged={title=>dispatchPages({type:'title',id:page.id,title})} tool={tools.some(t=>t.id===page.id)} toggleTool={()=>void changeTool(page.id,tools.some(t=>t.id===page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} back={()=>{if(standalone&&pages.items.length===1)location.href='/';else closePage(page.id);}} navigate={(mountId,path)=>open(fileReference(mountId,path))}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>打开报告，专注阅读。</h2><p>单击预览文件，双击保留页面，随时切回继续阅读。</p>{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
+      {pages.items.length?pages.items.map(page=><Viewer key={page.id} id={page.id} active={page.id===selected} titleChanged={title=>dispatchPages({type:'title',id:page.id,title})} tool={tools.some(t=>t.id===page.id)} toggleTool={()=>void changeTool(page.id,tools.some(t=>t.id===page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} back={()=>{if(standalone&&pages.items.length===1)location.href='/';else closePage(page.id);}} navigate={(mountId,path)=>openFile(fileReference(mountId,path))}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>打开报告，专注阅读。</h2><p>单击预览文件，双击保留页面，随时切回继续阅读。</p>{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
     </main>
     {error&&<div className="toast" role="alert">{error}<button onClick={()=>setError('')}>关闭</button></div>}
     {manage&&<Management snapshot={data} project={data.projects.find(p=>p.id===manage)} close={()=>setManage(undefined)} saved={()=>{void reload();setRefresh(v=>v+1);}} removed={()=>{void reload();}}/>}
     {toolPicker&&<ToolPicker snapshot={data} close={()=>setToolPicker(false)} saved={()=>void reload()}/>}
     {guide&&<Help snapshot={data} selected={selected} close={()=>setGuide(false)} shortcuts={()=>setHelp(true)}/>}
     {help&&<ShortcutHelp close={()=>setHelp(false)} enabled={shortcutsEnabled} setEnabled={setShortcutsEnabled}/>}
-  </div>;
+  </div>{settingsPage&&<Settings close={closeSettings} htmlOpening={htmlOpening} setHtmlOpening={setHtmlOpening} singles={shortcutsEnabled} setSingles={setShortcutsEnabled}/>}</>;
 }
