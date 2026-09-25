@@ -1,6 +1,6 @@
 export const BRIDGE_MARKER = 'agentdeck-bridge' as const;
 export const BRIDGE_VERSION = 1 as const;
-export type BridgeAction = 'back' | 'forward' | 'sidebar' | 'immersive' | 'search' | 'help' | 'escape' | 'split-rows' | 'split-columns' | 'maximize' | 'close-tab' | 'close-pane';
+export type BridgeAction = 'back' | 'forward' | 'sidebar' | 'immersive' | 'search' | 'help' | 'escape' | 'split-rows' | 'split-columns' | 'maximize' | 'toggle-keep-tab' | 'close-tab' | 'close-pane';
 export type BridgeConfig = { mode: 'web' | 'workbench'; singles: boolean; navigation: boolean; escape: boolean; active: boolean };
 type Envelope = { marker: typeof BRIDGE_MARKER; version: typeof BRIDGE_VERSION; session: string };
 export type BridgeMessage = Envelope & (

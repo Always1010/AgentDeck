@@ -78,6 +78,30 @@ test('search exits immersion and list arrows do not replace a live tool', async 
   await expect(page.locator('.explorer')).toBeHidden();
 });
 
+test('P toggles whether the active tab is kept and therefore replaceable', async ({ page }) => {
+  const activeTab = page.getByRole('tab', { name: 'index.html', exact: true });
+  await expect(activeTab.locator('..')).toHaveClass(/temporary/);
+  await activeTab.focus();
+  await page.keyboard.press('p');
+  await expect(activeTab.locator('..')).not.toHaveClass(/temporary/);
+
+  await page.getByRole('treeitem', { name: 'a.md', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'index.html', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'a.md', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab')).toHaveCount(2);
+
+  const noteTab = page.getByRole('tab', { name: 'a.md', exact: true });
+  await noteTab.focus();
+  await page.keyboard.press('p');
+  await expect(noteTab.locator('..')).not.toHaveClass(/temporary/);
+  await page.keyboard.press('p');
+  await expect(noteTab.locator('..')).toHaveClass(/temporary/);
+  await page.getByRole('treeitem', { name: 'b.md', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'a.md', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('tab', { name: 'b.md', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab')).toHaveCount(2);
+});
+
 test('form input, composition and modified shortcuts remain unhandled', async ({ page }) => {
   const search = page.getByLabel('筛选文件', { exact: true });
   await search.fill('f/?');

@@ -1,4 +1,4 @@
-export type Shortcut = 'immersive' | 'sidebar' | 'search' | 'help' | 'escape' | 'back' | 'forward' | 'split-rows' | 'split-columns' | 'maximize' | 'close-tab' | 'close-pane';
+export type Shortcut = 'immersive' | 'sidebar' | 'search' | 'help' | 'escape' | 'back' | 'forward' | 'split-rows' | 'split-columns' | 'maximize' | 'toggle-keep-tab' | 'close-tab' | 'close-pane';
 type KeyInput = Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'altKey' | 'metaKey' | 'shiftKey' | 'isComposing' | 'repeat' | 'defaultPrevented' | 'keyCode'>;
 
 /** Navigation claims only exact Alt+arrows; other browser/OS combinations remain untouched. */
@@ -15,6 +15,7 @@ export function shortcutFor(event: KeyInput, editing: boolean, enabled: boolean,
     if (event.key.toLowerCase() === 'o') return 'split-rows';
     if (event.key.toLowerCase() === 'e') return 'split-columns';
     if (event.key.toLowerCase() === 'x') return 'maximize';
+    if (event.key.toLowerCase() === 'p') return 'toggle-keep-tab';
     if (event.key.toLowerCase() === 'w') return 'close-tab';
     if (event.key.toLowerCase() === 'q') return 'close-pane';
   }
