@@ -45,7 +45,7 @@ export function PageTabs({ scope, pages, active, snapshot, open, keep, close }: 
     {pages.map((page, index) => {
       const label = pageLabel(page, pages, snapshot);
       return <div className={`page-tab ${page.id === active ? 'active' : ''} ${page.kept ? '' : 'temporary'}`} key={page.id}>
-        <button id={pageTabId(page.id,scope)} role="tab" aria-selected={page.id === active} aria-controls={pagePanelId(page.id,scope)} tabIndex={page.id === active ? 0 : -1} title={`${label.path}${page.kept ? '' : '\n临时预览 · 双击保留页面'}`} onClick={() => open(page.id)} onDoubleClick={() => keep(page.id)} onContextMenu={e => { e.preventDefault(); setMenu({id:page.id,x:Math.min(e.clientX,window.innerWidth-190),y:Math.min(e.clientY,window.innerHeight-90)}); }} onKeyDown={e => { if(e.key==='F10'&&e.shiftKey){e.preventDefault();const r=e.currentTarget.getBoundingClientRect();setMenu({id:page.id,x:Math.min(r.left,window.innerWidth-190),y:r.bottom});}else keys(e,index); }}><span>{label.display}</span></button>
+        <button id={pageTabId(page.id,scope)} role="tab" aria-selected={page.id === active} aria-controls={pagePanelId(page.id,scope)} tabIndex={page.id === active ? 0 : -1} title={`${label.path}${page.kept ? '' : '\n临时预览 · 按 P 或双击保留页面'}`} onClick={() => open(page.id)} onDoubleClick={() => keep(page.id)} onContextMenu={e => { e.preventDefault(); setMenu({id:page.id,x:Math.min(e.clientX,window.innerWidth-190),y:Math.min(e.clientY,window.innerHeight-90)}); }} onKeyDown={e => { if(e.key==='F10'&&e.shiftKey){e.preventDefault();const r=e.currentTarget.getBoundingClientRect();setMenu({id:page.id,x:Math.min(r.left,window.innerWidth-190),y:r.bottom});}else keys(e,index); }}><span>{label.display}</span></button>
         <button className="tab-action" aria-label={`关闭页面：${label.display}`} title="关闭页面" onClick={() => close(page.id)}><Icon name="close"/></button>
       </div>;
     })}
@@ -61,7 +61,7 @@ export function OpenPages({ pages, active, snapshot, open, keep, close, expanded
     {expanded && <div className="open-pages-list">{pages.length ? pages.map(page => {
       const label = pageLabel(page, pages, snapshot);
       return <div key={page.id} className={`open-page-row ${page.id === active ? 'active' : ''} ${page.kept ? '' : 'temporary'}`}>
-        <button className="open-page-link" aria-current={page.id === active ? 'page' : undefined} title={`${label.path}${page.kept ? '' : '\n临时预览 · 双击保留页面'}`} onClick={() => open(page.id)} onDoubleClick={() => keep(page.id)}>{label.display}</button>
+        <button className="open-page-link" aria-current={page.id === active ? 'page' : undefined} title={`${label.path}${page.kept ? '' : '\n临时预览 · 按 P 或双击保留页面'}`} onClick={() => open(page.id)} onDoubleClick={() => keep(page.id)}>{label.display}</button>
         <button className="tab-action" aria-label={`关闭页面：${label.display}`} title="关闭页面" onClick={() => close(page.id)}><Icon name="close"/></button>
       </div>;
     }) : <p>打开报告后会显示在这里</p>}</div>}

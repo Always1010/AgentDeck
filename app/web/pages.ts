@@ -3,6 +3,7 @@ export type Pages = { items: OpenPage[]; active: string; recent: string[] };
 export type PageAction =
   | { type: 'open'; id: string; keep?: boolean }
   | { type: 'keep'; id: string }
+  | { type: 'toggle-keep'; id: string }
   | { type: 'close'; id: string }
   | { type: 'title'; id: string; title: string }
   | { type: 'aliases'; aliases: Record<string, string> };
@@ -26,6 +27,7 @@ export function pagesReducer(state: Pages, action: PageAction): Pages {
     return { items, active: action.id, recent: [action.id, ...state.recent.filter(id => id !== action.id && ids.has(id))] };
   }
   if (action.type === 'keep') return { ...state, items: state.items.map(p => p.id === action.id ? { ...p, kept: true } : p) };
+  if (action.type === 'toggle-keep') return { ...state, items: state.items.map(p => p.id === action.id ? { ...p, kept: !p.kept } : p) };
   if (action.type === 'title') {
     if (state.items.find(p => p.id === action.id)?.title === action.title) return state;
     return { ...state, items: state.items.map(p => p.id === action.id ? { ...p, title: action.title } : p) };

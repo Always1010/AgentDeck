@@ -15,6 +15,18 @@ test('browsing replaces only the temporary page; keeping and revisiting never du
   expect(state.items.every(p => p.kept)).toBe(true);
 });
 
+test('toggling keep makes the active page persistent and then replaceable again', () => {
+  let state = pagesReducer(initialPages(), { type: 'open', id: 'draft' });
+  state = pagesReducer(state, { type: 'toggle-keep', id: 'draft' });
+  expect(state.items).toEqual([{ id: 'draft', kept: true }]);
+  state = pagesReducer(state, { type: 'open', id: 'beside' });
+  expect(state.items).toEqual([{ id: 'draft', kept: true }, { id: 'beside', kept: false }]);
+  state = pagesReducer(state, { type: 'open', id: 'draft' });
+  state = pagesReducer(state, { type: 'toggle-keep', id: 'draft' });
+  state = pagesReducer(state, { type: 'open', id: 'replacement' });
+  expect(state.items.map(page => page.id)).toEqual(['replacement', 'beside']);
+});
+
 test('closing active returns to the last used remaining page, closing background preserves active', () => {
   let state = initialPages('a');
   state = pagesReducer(state, { type: 'open', id: 'b', keep: true });
