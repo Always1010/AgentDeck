@@ -31,7 +31,7 @@ export function injectHtmlBridge(html: string): string {
 }
 
 /** Plan an ASCII/UTF-16 insertion, preserving every original byte, including legacy encodings. */
-export function planHtmlBridge(prefix: Buffer, totalSize = prefix.length) {
+export function planHtmlBridge(prefix: Buffer, totalSize = prefix.length, fileVersion?:string) {
   const bom = prefix[0] === 0xff && prefix[1] === 0xfe ? 'utf-16le' : prefix[0] === 0xfe && prefix[1] === 0xff ? 'utf-16be' : prefix.subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf])) ? 'utf-8' : null;
   const wide = bom === 'utf-16le' || bom === 'utf-16be';
   const bomBytes = wide ? 2 : bom === 'utf-8' ? 3 : 0;
@@ -60,13 +60,14 @@ export function planHtmlBridge(prefix: Buffer, totalSize = prefix.length) {
     }
   }
   const position = injectionPosition(html, prefix.length >= totalSize);
-  const script = position === null ? Buffer.alloc(0) : Buffer.from(scriptTag, wide ? 'utf16le' : 'ascii');
+  const tag=fileVersion&&/^[\d.:-]+$/.test(fileVersion)?scriptTag.replace('<script ',`<script data-file-version="${fileVersion}" `):scriptTag;
+  const script = position === null ? Buffer.alloc(0) : Buffer.from(tag, wide ? 'utf16le' : 'ascii');
   if (bom === 'utf-16be') script.swap16();
   return { offset: position === null ? 0 : bomBytes + position * (wide ? 2 : 1), script, contentType: `text/html; charset=${charset}` };
 }
 
 /** HEAD inspects at most a fixed prefix; GET streams the rest without decoding the document. */
-export async function prepareHtmlBridge(file: string, size: number) {
+export async function prepareHtmlBridge(file: string, size: number, fileVersion?:string) {
   const handle = await fs.open(file, 'r');
   const buffer = Buffer.alloc(Math.min(size, htmlBridgePrefixLimit));
   let bytesRead = 0;
@@ -78,7 +79,7 @@ export async function prepareHtmlBridge(file: string, size: number) {
     }
   } finally { await handle.close(); }
   const prefix = buffer.subarray(0, bytesRead);
-  const plan = planHtmlBridge(prefix, size);
+  const plan = planHtmlBridge(prefix, size, fileVersion);
   return {
     contentType: plan.contentType,
     contentLength: size + plan.script.length,
@@ -99,13 +100,14 @@ export function htmlBridgeScript(mainOrigin: string): string {
   const version = ${BRIDGE_VERSION};
   const embedded = window.parent !== window;
   const session = crypto.randomUUID();
+  const fileVersion = document.currentScript?.getAttribute('data-file-version') || '';
   let config = { mode: 'web', singles: false, navigation: false, escape: false, active: false };
   let configured = false;
   let composing = false;
   const claimedKeys = new Set();
   const keyIdentity = event => event.code || event.key.toLowerCase();
   const send = (type, fields = {}) => {
-    if (embedded) window.parent.postMessage({ marker, version, session, type, ...fields }, origin);
+    if (embedded) window.parent.postMessage({ marker, version, session, type, ...(type === 'ready' ? { fileVersion, path: location.pathname } : {}), ...fields }, origin);
   };
   window.addEventListener('message', event => {
     if (!embedded || event.source !== window.parent || event.origin !== origin) return;

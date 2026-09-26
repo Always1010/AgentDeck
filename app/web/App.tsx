@@ -21,7 +21,9 @@ import { isHtmlKeyMode, type HtmlKeyMode } from './useHtmlBridge.js';
 import type { BridgeAction } from '../shared/bridge.js';
 import { FileOpenMenu } from './FileOpenMenu.js';
 import { FileTypeFilterControl } from './FileTypeFilter.js';
-import { defaultFileTypeFilter, isFileTypeFilter, type FileTypeFilter } from './fileExtensions.js';
+import { useFileUpdates } from './useFileUpdates.js';
+import { UnreadFiles } from './UnreadFiles.js';
+import type { FileUpdate } from '../shared/updates.js';
 import { openReadingSession, type ReadingSession, type ReadingSnapshot } from './readingSessions.js';
 import { useReadingPersistence } from './useReadingPersistence.js';
 import './style.css';
@@ -88,7 +90,9 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   const selected=pages.active;
   const [openedExpanded,setOpenedExpanded]=useState(()=>session?.snapshot?.view.openedExpanded??oldPreference('pages.expanded',true,isBoolean));
   const [favorites,setFavorites]=usePreference<string[]>('favorites',[],(v):v is string[]=>Array.isArray(v)&&v.every(x=>typeof x==='string'));
-  const [fileTypeFilter,setFileTypeFilter]=usePreference<FileTypeFilter>('explorer.file-types',defaultFileTypeFilter,isFileTypeFilter);
+  const updates=useFileUpdates();
+  const fileTypeFilter=updates.filter,setFileTypeFilter=updates.setFilter;
+  const [updateOpen,setUpdateOpen]=useState<Record<string,number>>({});
   const [aliases,setAliases]=usePreference<Record<string,string>>('file.aliases',{},(v):v is Record<string,string>=>!!v&&typeof v==='object'&&!Array.isArray(v)&&Object.values(v).every(x=>typeof x==='string'));
   const favoritesRef=useRef(favorites);favoritesRef.current=favorites;
   const aliasesRef=useRef(aliases);aliasesRef.current=aliases;
@@ -137,6 +141,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   async function reload(){const token=++request.current;try{const [next,toolList]=await Promise.all([api<Snapshot>('/api/projects'),api<ToolItem[]>('/api/tools')]);if(token===request.current){setData(next);setTools(toolList);setError('');}}catch(e){if(token===request.current)setError((e as Error).message);}}
   useEffect(()=>{void reload();const events=new EventSource('/api/events');
     for(const type of ['registry-changed','resync'])events.addEventListener(type,()=>{void reload();setRefresh(v=>v+1);});
+    for(const type of ['file-updates','resync'])events.addEventListener(type,()=>void updates.reload());
     return()=>{events.close();request.current++;};
   },[]);
   useEffect(()=>{let cancelled=false;
@@ -179,6 +184,11 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
       return;
     }
     open(id,keep,pane);
+  }
+  function openUpdate(item:FileUpdate){
+    openFile(item.id);
+    if(htmlOpening==='browser'&&/\.html?$/i.test(item.relativePath))return;
+    const key=`${workspace.active}:${item.id}`;setUpdateOpen(previous=>({...previous,[key]:(previous[key]||0)+1}));
   }
   function keepPage(id:string,pane:PaneId=workspace.active){dispatchPages({type:'keep',id:aliasesRef.current[id]||id},pane);}
   function closePage(id:string,pane:PaneId=workspace.active){
@@ -261,6 +271,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
       <button aria-label="快捷键" title="快捷键" onClick={()=>setHelp(true)}>?</button>
     </div></header>
     <aside className="explorer" aria-label="文件资源浏览器" aria-hidden={hidden}>
+      <UnreadFiles snapshot={updates.snapshot} projects={data} error={updates.error} ready={updates.ready} saving={updates.saving} open={openUpdate} acknowledge={updates.acknowledge} retry={updates.reload}/>
       <OpenPages panes={paneIds(workspace.root).map(id=>({id,pages:workspace.panes[id].items,active:workspace.panes[id].active}))} activePane={workspace.active} snapshot={data} open={openFromOverview} activate={revealPane} keep={(pane,id)=>keepPage(id,pane)} close={(pane,id)=>closePreview(id,pane)} expanded={openedExpanded} toggle={()=>setOpenedExpanded(!openedExpanded)}/>
       <div className="explorer-header"><nav aria-label="浏览视图"><button className={view==='files'?'active':''} onClick={()=>{setView('files');setQuery('');}}>文件</button><button className={view==='favorites'?'active':''} onClick={()=>{setView('favorites');setQuery('');}}>收藏</button><button className={view==='tools'?'active':''} onClick={()=>{setView('tools');setQuery('');}}>工具</button></nav><div className="explorer-actions">{view==='files'&&<FileTypeFilterControl value={fileTypeFilter} onChange={setFileTypeFilter}/>}<button aria-label={view==='tools'?'添加工具':'添加项目'} title={view==='tools'?'添加 HTML 工具':'添加项目 / 挂载目录'} onClick={()=>view==='tools'?setToolPicker(true):setManage('new')}><Icon name="plus"/></button><button aria-label="刷新目录" title="刷新已展开目录" onClick={()=>{void reload();setRefresh(v=>v+1);}}>↻</button></div></div>
       <div className="explorer-search"><input ref={searchRef} aria-label="筛选文件" type="search" placeholder={view==='tools'?'筛选工具':view==='favorites'?'筛选收藏':'筛选已加载文件…'} value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.nativeEvent.isComposing)return;if(e.key==='ArrowDown'||e.key==='Enter'){const first=Array.from(document.querySelectorAll<HTMLButtonElement>('.explorer-scroll .node-main:not(.folder)')).find(el=>el.getClientRects().length);if(first){e.preventDefault();if(e.key==='Enter')first.click();else first.focus();}}}}/></div>
@@ -290,7 +301,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
         return <section key={paneId} tabIndex={-1} style={style} className={`reading-pane ${workspace.active===paneId?'active-pane':''}`} data-pane={paneId} aria-label={`阅读区 ${paneId+1}`} hidden={!visible} inert={!visible} onPointerDownCapture={()=>activatePane(paneId)} onFocusCapture={()=>activatePane(paneId)}>
           <div className="pane-navigation"><span>阅读区 {paneId+1}</span><button aria-label="后退" title="上一个文件 · Alt＋←" disabled={history.index<=0} onClick={()=>dispatchWorkspace({type:'history',pane:paneId,direction:-1})}>←</button><button aria-label="前进" title="下一个文件 · Alt＋→" disabled={history.index>=history.entries.length-1} onClick={()=>dispatchWorkspace({type:'history',pane:paneId,direction:1})}>→</button><button className="pane-close" aria-label={`关闭阅读区 ${paneId+1}`} title="关闭阅读区 · Q" aria-keyshortcuts={shortcutsEnabled?'q':undefined} onClick={()=>requestClosePane(paneId)}><Icon name="close"/></button></div>
           {!!pane.items.length&&<PageTabs scope={scope} pages={pane.items} active={pane.active} snapshot={data} open={id=>open(id,false,paneId)} keep={id=>keepPage(id,paneId)} close={id=>closePreview(id,paneId)}/>}
-          {pane.items.length?pane.items.map(page=><Viewer documentFontSize={documentFontSize} keyboardActive={workspace.active===paneId} immersive={immersive} bridgeConfig={{mode:htmlKeys,singles:shortcutsEnabled,navigation:navigationEnabled,escape:immersive||searchActive||workspace.maximized!==null,active:!settingsPage&&!help&&!guide&&!manage&&!toolPicker&&closingPane===null}} bridgeAction={action=>runAction(action,paneId)} focused={()=>activatePane(paneId)} initialScroll={positions.current.get(`${paneId}:${page.id}`)} positionChanged={position=>positionChanged(`${paneId}:${page.id}`,position)} scope={scope} key={page.id} id={page.id} active={visible&&page.id===pane.active} titleChanged={title=>dispatchPages({type:'title',id:page.id,title},paneId)} tool={tools.some(t=>t.id===page.id)} toggleTool={()=>void changeTool(page.id,tools.some(t=>t.id===page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} navigate={(mountId,path)=>{activatePane(paneId);openFile(fileReference(mountId,path),false,paneId);}} other={()=>openOther(page.id)}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>{Object.keys(workspace.panes).length===1?'打开报告，专注阅读。':'选择文件，开始对照。'}</h2><p>点击此阅读区，再从侧栏选择文件。双击文件保留标签。</p>{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button onClick={()=>{activatePane(paneId);setImmersive(false);setCollapsed(false);}}>选择文件</button><button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
+          {pane.items.length?pane.items.map(page=><Viewer reloadRequest={updateOpen[`${paneId}:${page.id}`]||0} acknowledge={updates.acknowledge} documentFontSize={documentFontSize} keyboardActive={workspace.active===paneId} immersive={immersive} bridgeConfig={{mode:htmlKeys,singles:shortcutsEnabled,navigation:navigationEnabled,escape:immersive||searchActive||workspace.maximized!==null,active:!settingsPage&&!help&&!guide&&!manage&&!toolPicker&&closingPane===null}} bridgeAction={action=>runAction(action,paneId)} focused={()=>activatePane(paneId)} initialScroll={positions.current.get(`${paneId}:${page.id}`)} positionChanged={position=>positionChanged(`${paneId}:${page.id}`,position)} scope={scope} key={page.id} id={page.id} active={visible&&page.id===pane.active} titleChanged={title=>dispatchPages({type:'title',id:page.id,title},paneId)} tool={tools.some(t=>t.id===page.id)} toggleTool={()=>void changeTool(page.id,tools.some(t=>t.id===page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} navigate={(mountId,path)=>{activatePane(paneId);openFile(fileReference(mountId,path),false,paneId);}} other={()=>openOther(page.id)}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>{Object.keys(workspace.panes).length===1?'打开报告，专注阅读。':'选择文件，开始对照。'}</h2><p>点击此阅读区，再从侧栏选择文件。双击文件保留标签。</p>{Object.keys(workspace.panes).length===1&&updates.snapshot.total>0&&<div className="empty-updates"><strong>更新未读 · {updates.snapshot.total}</strong>{updates.snapshot.items.slice(0,5).map(item=><button key={item.id} title={item.relativePath} onClick={()=>openUpdate(item)}>{item.kind==='added'?'新增':'更新'} · {item.relativePath}</button>)}</div>}{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button onClick={()=>{activatePane(paneId);setImmersive(false);setCollapsed(false);}}>选择文件</button><button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
         </section>;
       }}
     </ReadingLayout>

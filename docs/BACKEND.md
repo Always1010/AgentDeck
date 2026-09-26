@@ -166,7 +166,7 @@
 | `PUT /api/file-updates/filter` | `{ filter, initializeOnly? }`；完整保存现有 all/allow/deny 筛选，`initializeOnly` 仅供首个客户端迁移旧浏览器偏好。 |
 | `POST /api/file-updates/read` | `{ id, version }` 确认单文件的实际已读版本，或 `{ through }` 确认该水位之前、当前筛选范围内的未读；后续版本保留。 |
 
-SSE 新增 `file-updates` 失效通知，客户端重新拉取快照；连接恢复也重新拉取，不依赖逐条事件重放。读取正文的响应增加可选 `fileVersion`，只有读取前后版本稳定才提供。HTML 预览可携带 `fileVersion` 查询参数，版本不匹配返回 409，防止旧元信息与新内容混用。
+SSE 新增 `file-updates` 失效通知，客户端重新拉取快照；连接恢复也重新拉取，不依赖逐条事件重放。读取正文的响应增加可选 `fileVersion`，只有读取前后版本稳定才提供。HTML 的注入桥接脚本携带文件版本，`ready` 消息返回该版本和页面路径；阅读区确认来源、iframe、实际路径、加载完成及版本一致后才标记已读，不修改 HTML 地址。HTML 预览接口也接受可选 `fileVersion` 查询参数，版本不匹配返回 409。
 
 | 位置 | 说明 |
 | --- | --- |

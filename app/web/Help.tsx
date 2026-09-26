@@ -153,7 +153,7 @@ export function Help({ snapshot, selected, close, shortcuts }: { snapshot: Snaps
         {section === 'faq' && <>
           <span className="eyebrow">05 / 常见问题</span><h2>遇到问题，从这里找下一步</h2><p className="help-lead">先区分目录、文件内容和预览资源，再把可复现的信息交给 Agent。</p>
           <div className="help-faq">
-            <section><h3>Agent 已经生成文件，为什么看不到？</h3><p>核对它报告的真实路径是否位于已挂载目录。展开对应文件夹，清空筛选，点击“刷新目录”。未展开的子目录不会自动扫描；隐藏敏感目录、排除路径和链接目录也不会显示。</p></section>
+            <section><h3>Agent 已经生成文件，为什么看不到？</h3><p>核对它报告的真实路径是否位于已挂载目录，并检查文件类型筛选。侧栏“更新未读”可发现未展开子目录中的新增和修改；首次启用时已有的文件不算新增。也可以展开对应文件夹，清空名称筛选，点击“刷新目录”。隐藏敏感目录、排除路径和链接目录不会显示。</p></section>
             <section><h3>网页空白，或者样式、图片丢失？</h3><p>确认交付的是 HTML 或完整构建输出。让 Agent 检查资源是否齐全、引用是否相对入口、资源是否在允许访问的挂载范围内。Vite 静态输出使用 <code>base: './'</code>，SPA 推荐 hash 路由；依赖后端或开发服务器的页面需要另行适配。</p></section>
             <section><h3>文件改了，为什么页面没变化？</h3><p>HTML 更新会提示手动加载，以保留当前输入。只改引用的 CSS、JS、图片不会触发入口更新提示，点击预览顶部“刷新”。需要构建的工具还应先由 Agent 重新构建。</p></section>
             <section><h3>CSV、JSON、PDF、Office 文件怎么用？</h3><p>CSV 和 JSON 当前显示原文；PDF、Office 等不支持的文件提供下载。需要可阅读的图表或交互表格时，请 Agent 另行生成 HTML，并保留原始数据便于核对。</p></section>
