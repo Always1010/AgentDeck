@@ -67,3 +67,9 @@ test('API validates inputs, first-client migration does not overwrite shared fil
   await fs.writeFile(path.join(root,'page.html'),'<h1>changed</h1>');
   expect((await app.preview.inject({url:`/m/${id}/page.html?fileVersion=${encodeURIComponent(entry.fileVersion)}`,headers:previewHeaders})).statusCode).toBe(409);
 });
+test('removing a mount that failed its first baseline clears its stale error',async()=>{
+  await fs.rm(root,{recursive:true,force:true});await app.updates.configure(filter);
+  expect(app.updates.snapshot().errors.length).toBeGreaterThan(0);
+  await app.main.inject({method:'DELETE',url:`/api/mounts/${id}`,headers,payload:{}});await app.updates.reconcile();
+  expect(app.updates.snapshot().errors).toEqual([]);
+});
