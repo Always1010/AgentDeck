@@ -12,6 +12,19 @@ test.beforeAll(async () => {
     await fs.writeFile(path.join(root, `${name}.md`), `# ${name}\n\n${'阅读内容\n\n'.repeat(200)}`);
     await fs.writeFile(path.join(root, `${name}.txt`), `纯文本 ${name}\n`);
   }
+  await fs.writeFile(path.join(root, 'outline.md'), `# 阅读手册
+
+## 开始使用
+
+${'开篇内容。\n\n'.repeat(35)}
+
+### 准备工作
+
+${'准备内容。\n\n'.repeat(25)}
+
+## 开始使用
+
+${'后续内容。\n\n'.repeat(30)}`);
 });
 test.afterAll(async () => { await fs.rm(root, { recursive: true, force: true }); });
 test.beforeEach(async ({ page }) => {
@@ -288,6 +301,30 @@ test('more settings floats without resizing, closes outside and on Escape', asyn
   await first.getByRole('button', { name: '更多设置' }).click();
   await first.locator('.reader').click();
   await expect(page.locator('[data-viewer-settings]')).toHaveCount(0);
+});
+
+test('Markdown outline toggles upward with T, navigates duplicates and collapses branches', async ({ page }) => {
+  await page.getByRole('treeitem', { name: 'outline.md', exact: true }).click();
+  const first = pane(page, 0), frame = first.locator('.markdown-toc-frame');
+  await expect(first.getByRole('complementary', { name: '文档目录' })).toBeVisible();
+  await expect(frame).toHaveClass(/is-open/);
+  const openBox = await frame.boundingBox();
+  await page.keyboard.press('t');
+  await expect(first.getByRole('button', { name: '展开文档目录' })).toBeVisible();
+  await expect(frame).not.toHaveClass(/is-open/);
+  await expect.poll(() => frame.evaluate(element => element.getBoundingClientRect().height)).toBeLessThanOrEqual(2);
+  const closedFrame = await frame.boundingBox();
+  expect(closedFrame!.y).toBeCloseTo(openBox!.y, 0);
+  expect(closedFrame!.height).toBeLessThan(openBox!.height);
+  await page.keyboard.press('t');
+  await expect(frame).toHaveClass(/is-open/);
+  await first.getByRole('button', { name: '收起 阅读手册 的子目录' }).click();
+  await expect(first.locator('.markdown-toc-row[data-level="2"]:visible')).toHaveCount(0);
+  await first.getByRole('button', { name: '展开 阅读手册 的子目录' }).click();
+  await first.locator('.markdown-toc-link').filter({ hasText: '开始使用' }).last().click();
+  await expect.poll(() => first.locator('.reader').evaluate(element => element.scrollTop)).toBeGreaterThan(900);
+  await page.keyboard.press('Escape');
+  await expect(frame).not.toHaveClass(/is-open/);
 });
 
 test('direct source and copy actions leave HTML input intact and close its popover', async ({page,context})=>{
