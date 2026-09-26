@@ -165,8 +165,15 @@ export function Markdown({ text, entry, previewOrigin, navigate, keyboardActive 
   const prefix = previewPath(entry.mountId, '');
 
   useLayoutEffect(() => {
-    const reader = article.current?.closest('.reader');
-    if (reader) setTocOpen(reader.clientWidth >= 720);
+    const reader = article.current?.closest<HTMLElement>('.reader');
+    const shell = article.current?.parentElement;
+    if (!reader || !shell) return;
+    setTocOpen(reader.clientWidth >= 720);
+    const measure = () => shell.style.setProperty('--markdown-reader-height', `${reader.clientHeight}px`);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(reader);
+    return () => observer.disconnect();
   }, []);
   useEffect(() => {
     if (!keyboardActive || !headings.length) return;

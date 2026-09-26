@@ -24,7 +24,9 @@ ${'准备内容。\n\n'.repeat(25)}
 
 ## 开始使用
 
-${'后续内容。\n\n'.repeat(30)}`);
+${'后续内容。\n\n'.repeat(30)}
+
+${Array.from({ length: 32 }, (_, index) => `### 扩展主题 ${index + 1}\n\n主题说明。`).join('\n\n')}`);
 });
 test.afterAll(async () => { await fs.rm(root, { recursive: true, force: true }); });
 test.beforeEach(async ({ page }) => {
@@ -308,6 +310,9 @@ test('Markdown outline toggles upward with T, navigates duplicates and collapses
   const first = pane(page, 0), frame = first.locator('.markdown-toc-frame');
   await expect(first.getByRole('complementary', { name: '文档目录' })).toBeVisible();
   await expect(frame).toHaveClass(/is-open/);
+  const readerBox = await first.locator('.reader').boundingBox();
+  const tocBox = await first.locator('.markdown-toc').boundingBox();
+  expect(readerBox!.y + readerBox!.height - tocBox!.y - tocBox!.height).toBeCloseTo(18, 0);
   const openBox = await frame.boundingBox();
   await page.keyboard.press('t');
   await expect(first.getByRole('button', { name: '展开文档目录' })).toBeVisible();
@@ -339,6 +344,12 @@ test('Markdown outline toggles upward with T, navigates duplicates and collapses
   await expect(first.locator('details.markdown-section[open]')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(frame).not.toHaveClass(/is-open/);
+  await page.keyboard.press('o');
+  const lower = pane(page, 1);
+  await expect(lower.getByRole('complementary', { name: '文档目录' })).toBeVisible();
+  const lowerReaderBox = await lower.locator('.reader').boundingBox();
+  const lowerTocBox = await lower.locator('.markdown-toc').boundingBox();
+  expect(lowerReaderBox!.y + lowerReaderBox!.height - lowerTocBox!.y - lowerTocBox!.height).toBeCloseTo(18, 0);
 });
 
 test('direct source and copy actions leave HTML input intact and close its popover', async ({page,context})=>{
