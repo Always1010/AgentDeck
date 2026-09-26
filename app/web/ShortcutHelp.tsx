@@ -12,6 +12,7 @@ export function ShortcutHelp({ close, enabled, setEnabled }: { close: () => void
       <div><dt><kbd>Q</kbd></dt><dd>关闭当前阅读区；多个标签时默认确认，可在设置中关闭提示</dd></div>
       <div><dt><kbd>Alt</kbd>＋<kbd>← / →</kbd></dt><dd>当前阅读区的文件后退 / 前进，可在设置中单独关闭</dd></div>
       <div><dt><kbd>B</kbd></dt><dd>展开 / 收起文件侧栏；沉浸中先退出并展开</dd></div>
+      <div><dt><kbd>T</kbd></dt><dd>展开 / 收起当前 Markdown 的文档目录</dd></div>
       <div><dt><kbd>F</kbd></dt><dd>只显示当前文件内容；再次按 F 或 Esc 恢复原布局</dd></div>
       <div><dt><kbd>Esc</kbd></dt><dd>关闭最上层弹窗或更多设置；结束搜索；退出沉浸；恢复最大化</dd></div>
       <div><dt><kbd>/</kbd></dt><dd>筛选已加载文件、收藏或工具，沉浸中先退出并打开筛选</dd></div>
@@ -20,7 +21,7 @@ export function ShortcutHelp({ close, enabled, setEnabled }: { close: () => void
       <div><dt><kbd>?</kbd></dt><dd>显示快捷键帮助</dd></div>
     </dl>
     <section className="tab-help"><h3>标签页操作</h3><p><em>斜体标题</em>表示未固定标签。打开其他尚未打开的文件，只替换当前未固定标签；当前标签已固定时新建标签。目标文件已经在本区域打开时，直接切换到它。文件前进 / 后退也遵循这套规则。</p><p><strong>按 P 可固定或取消固定当前标签。</strong>也可双击文件列表中的文件、双击标签页，或右键标签选择“保留标签页”来固定。固定后标题恢复正体，打开其他文件不会替换它。</p><p className="muted">保留标签不等于保存文件内容。HTML 设置为浏览器新标签页打开时，文件列表遵循该设置。</p></section>
-    <label className="inline"><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />启用单键快捷键（O、E、X、P、W、Q、B、F、/、?）</label>
+    <label className="inline"><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />启用单键快捷键（O、E、X、P、W、Q、B、T、F、/、?）</label>
     <p className="muted">输入文字、中文输入法组词时，不触发单键快捷键。除启用的 Alt＋左右箭头外，浏览器和系统组合键保持原行为。</p>
     <p className="muted">内嵌 HTML 可在设置中选择“工作台优先”，启用页面内快捷键；输入文字时不触发单键命令。页面提示“未接管”时请使用工作台按钮。浏览器独立标签页保持网页自身快捷键。</p>
   </Dialog>;
