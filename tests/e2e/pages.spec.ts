@@ -186,5 +186,6 @@ test('temporary tabs use italics without labels or keep buttons and explain rete
   await openFile(page, 'c.html').click();
   await expect(page.getByRole('tab')).toHaveCount(3);
   await page.getByRole('button', { name: '快捷键', exact: true }).click();
-  await expect(page.getByRole('dialog')).toContainText('双击文件列表中的文件，或双击标签页');
+  await expect(page.getByRole('dialog')).toContainText('双击文件列表中的文件');
+  await expect(page.getByRole('dialog')).toContainText('双击标签页');
 });
