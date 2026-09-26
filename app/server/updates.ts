@@ -146,6 +146,8 @@ export class FileUpdates {
     if(!this.initialized)return;
     this.errors.delete('operation');
     const mounts=this.mounts();
+    for(const id of this.errors.keys())if(!['operation','storage'].includes(id)&&!mounts.some(m=>m.id===id))this.errors.delete(id);
+    for(const w of this.watchers.values())if(!mounts.some(m=>m.id===w.mountId))this.dropWatchers(w.mountId);
     for(const id of Object.keys(this.state.mounts))if(!mounts.some(m=>m.id===id)){
       this.dropWatchers(id);delete this.state.mounts[id];this.errors.delete(id);
       for(const [key,r] of Object.entries(this.state.records))if(r.mountId===id)delete this.state.records[key];
