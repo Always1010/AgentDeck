@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { parseFileReference, type Snapshot } from '../shared/model.js';
 import { Icon } from './Icon.js';
 import type { OpenPage } from './pages.js';
+import type { PaneId } from './workspace.js';
 
 export function pageLabel(page: OpenPage, pages: OpenPage[], snapshot: Snapshot) {
   const ref = parseFileReference(page.id);
@@ -55,15 +56,56 @@ export function PageTabs({ scope, pages, active, snapshot, open, keep, close }: 
   </div>}</>;
 }
 
-export function OpenPages({ pages, active, snapshot, open, keep, close, expanded, toggle }: Props & { expanded: boolean; toggle: () => void }) {
-  return <section className="open-pages" aria-label="已打开页面">
-    <button className="open-pages-heading" aria-expanded={expanded} onClick={toggle}><span aria-hidden="true">{expanded ? '▾' : '▸'}</span> 已打开页面 <span>{pages.length}</span></button>
-    {expanded && <div className="open-pages-list">{pages.length ? pages.map(page => {
-      const label = pageLabel(page, pages, snapshot);
-      return <div key={page.id} className={`open-page-row ${page.id === active ? 'active' : ''} ${page.kept ? '' : 'temporary'}`}>
-        <button className="open-page-link" aria-current={page.id === active ? 'page' : undefined} title={`${label.path}${page.kept ? '' : '\n临时预览 · 按 P 或双击保留页面'}`} onClick={() => open(page.id)} onDoubleClick={() => keep(page.id)}>{label.display}</button>
-        <button className="tab-action" aria-label={`关闭页面：${label.display}`} title="关闭页面" onClick={() => close(page.id)}><Icon name="close"/></button>
+type OpenPane = { id: PaneId; pages: OpenPage[]; active: string };
+type OpenPagesProps = {
+  panes: OpenPane[];
+  activePane: PaneId;
+  snapshot: Snapshot;
+  open: (pane: PaneId, id: string) => void;
+  activate: (pane: PaneId) => void;
+  keep: (pane: PaneId, id: string) => void;
+  close: (pane: PaneId, id: string) => void;
+  expanded: boolean;
+  toggle: () => void;
+};
+
+export function OpenPages({ panes, activePane, snapshot, open, activate, keep, close, expanded, toggle }: OpenPagesProps) {
+  const [collapsed, setCollapsed] = useState<Set<PaneId>>(() => new Set());
+  const allPages = panes.flatMap(pane => pane.pages);
+  const grouped = panes.length > 1;
+  function rows(pane: OpenPane) {
+    return pane.pages.length ? pane.pages.map(page => {
+      const label = pageLabel(page, allPages, snapshot);
+      const current = page.id === pane.active;
+      const selected = pane.id === activePane && current;
+      return <div key={page.id} className={`open-page-row ${selected ? 'active' : ''} ${current ? 'current' : ''} ${page.kept ? '' : 'temporary'}`}>
+        <span className="open-page-current-marker" aria-hidden="true">{current ? '●' : ''}</span>
+        <button className="open-page-link" aria-current={selected ? 'page' : undefined} title={`${label.path}${page.kept ? '' : '\n临时预览 · 按 P 或双击保留页面'}`} onClick={() => open(pane.id, page.id)} onDoubleClick={() => keep(pane.id, page.id)}>{label.display}</button>
+        <button className="tab-action" aria-label={`关闭页面：${label.display}${grouped ? `（阅读区 ${pane.id + 1}）` : ''}`} title="关闭页面" onClick={() => close(pane.id, page.id)}><Icon name="close"/></button>
       </div>;
-    }) : <p>打开报告后会显示在这里</p>}</div>}
+    }) : <p className="open-pages-empty">暂无打开页面</p>;
+  }
+  function togglePane(id: PaneId) {
+    setCollapsed(previous => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  return <section className="open-pages" aria-label="已打开页面">
+    <button className="open-pages-heading" aria-expanded={expanded} onClick={toggle}><span aria-hidden="true">{expanded ? '▾' : '▸'}</span> 已打开页面 <span>{grouped ? `${allPages.length} 页 · ${panes.length} 区` : allPages.length}</span></button>
+    {expanded && <div className={`open-pages-list ${grouped ? 'grouped' : ''}`}>
+      {grouped ? panes.map(pane => {
+        const paneExpanded = !collapsed.has(pane.id);
+        return <section className={`open-pages-group ${pane.id === activePane ? 'active' : ''}`} aria-label={`阅读区 ${pane.id + 1}`} key={pane.id}>
+          <div className="open-pages-group-heading">
+            <button className="open-pages-group-toggle" aria-label={`${paneExpanded ? '折叠' : '展开'}阅读区 ${pane.id + 1}`} aria-expanded={paneExpanded} onClick={() => togglePane(pane.id)}><span aria-hidden="true">{paneExpanded ? '▾' : '▸'}</span></button>
+            <button className="open-pages-group-activate" aria-current={pane.id === activePane ? 'true' : undefined} onClick={() => activate(pane.id)}>阅读区 {pane.id + 1}{pane.id === activePane && <span>当前操作区</span>}</button>
+            <span className="open-pages-group-count">{pane.pages.length}</span>
+          </div>
+          {paneExpanded && <div className="open-pages-group-list">{rows(pane)}</div>}
+        </section>;
+      }) : panes[0] && <>{panes[0].pages.length ? rows(panes[0]) : <p>打开报告后会显示在这里</p>}</>}
+    </div>}
   </section>;
 }

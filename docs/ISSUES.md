@@ -213,3 +213,13 @@
 - 解决方案：每个浏览器标签绑定独立现场 ID，通过 IndexedDB 事务保存布局树、区域标签与历史、显示状态、目录展开和可获取的文档滚动位置。URL 携带现场 ID，刷新及原地址重开恢复；活动现场重复打开时复制为独立副本，Web Locks 保证单一写入者。取得旧现场写入权后重新读取最新快照，避免关闭与重开竞态覆盖最后保存。初始化先校验再启用保存，写入失败保留原快照并提示。隐藏区域在首次可见时恢复滚动，避免最大化状态刷新后位置归零。设置提供最近现场恢复入口。
 - 验证：单元测试覆盖快照校验、串行保存、失败重试、所有权交接竞态、前台最近使用与无锁降级；真实浏览器覆盖混合分屏刷新、比例与固定标签、历史与滚动恢复、多页面复制隔离、关闭重开、HTML 隐藏区域恢复、最近现场、指定文件链接及存储不可用降级。完整回归与复验结果记录在 docs/TEST-RESULTS.md。
 - 相关文件：app/web/readingSessions.ts、app/web/useReadingPersistence.ts、app/web/RecentReadingSessions.tsx、app/web/App.tsx、app/web/Tree.tsx、app/web/Settings.tsx、app/web/Viewer.tsx、app/web/useHtmlBridge.ts、tests/readingSessions.test.ts、tests/e2e/sessions.spec.ts。
+
+## AD-022 — 已打开页面仅显示当前阅读区的标签
+
+- 日期：2026-09-26
+- 状态：已解决
+- 现象：工作台分屏后，侧栏“已打开页面”只显示当前聚焦阅读区的标签；切换阅读区时整份列表随之替换，无法从一个固定入口查看和进入其他阅读区的页面。
+- 原因：侧栏组件只接收 `workspace.active` 对应的页面状态，没有获得完整布局中的阅读区顺序和各区标签，也无法把页面操作定向到所属阅读区。
+- 解决方案：单区继续使用原列表；多区按布局顺序分组展示全部标签、各区当前页和当前操作区，并支持分组折叠。页面切换、固定和关闭均携带阅读区标识；从最大化状态选择其他区页面时恢复分屏并激活目标区。
+- 验证：类型检查；端到端测试覆盖所有阅读区及总数展示、跨区定位、最大化恢复、分组折叠和同一文件在不同区域的独立关闭。
+- 相关文件：app/web/App.tsx、app/web/PageTabs.tsx、app/web/style.css、app/web/Help.tsx、tests/e2e/pages.spec.ts、README.md。

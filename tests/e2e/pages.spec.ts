@@ -62,6 +62,36 @@ test('temporary preview, double-click retention, open list, deduplication and re
   await expect(page.getByRole('heading', { name: '打开报告，专注阅读。' })).toBeVisible();
 });
 
+test('open pages lists every reading pane and targets the owning pane', async ({ page }) => {
+  await openFile(page, 'a.html').dblclick();
+  await page.getByRole('button', { name: '左右分屏', exact: true }).click();
+  await openFile(page, 'b.html').dblclick();
+
+  const opened = page.getByRole('region', { name: '已打开页面', exact: true });
+  await expect(opened.getByRole('button', { name: /已打开页面/ })).toContainText('3 页 · 2 区');
+  const first = opened.getByRole('region', { name: '阅读区 1', exact: true });
+  const second = opened.getByRole('region', { name: '阅读区 2', exact: true });
+  await expect(first.locator('.open-page-row')).toHaveCount(1);
+  await expect(second.locator('.open-page-row')).toHaveCount(2);
+  await expect(second.getByRole('button', { name: '阅读区 2 当前操作区', exact: true })).toContainText('当前操作区');
+
+  await first.getByRole('button', { name: 'a.html', exact: true }).click();
+  await expect(page.locator('.reading-pane.active-pane')).toHaveAttribute('data-pane', '0');
+  await page.getByRole('button', { name: '最大化当前阅读区', exact: true }).click();
+  await second.getByRole('button', { name: 'b.html', exact: true }).click();
+  await expect(page.getByRole('button', { name: '最大化当前阅读区', exact: true })).toBeVisible();
+  await expect(page.locator('.reading-pane.active-pane')).toHaveAttribute('data-pane', '1');
+  await expect(second.getByRole('button', { name: '阅读区 2 当前操作区', exact: true })).toContainText('当前操作区');
+  await page.screenshot({ path: 'test-results/pages-grouped.png' });
+
+  await second.getByRole('button', { name: '折叠阅读区 2', exact: true }).click();
+  await expect(second.locator('.open-page-row')).toHaveCount(0);
+  await second.getByRole('button', { name: '展开阅读区 2', exact: true }).click();
+  await second.getByRole('button', { name: '关闭页面：a.html（阅读区 2）', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'a.html', exact: true })).toHaveCount(1);
+  await expect(first.getByRole('button', { name: 'a.html', exact: true })).toBeVisible();
+});
+
 test('kept HTML input, scroll and source browsing survive switches; background polling stops', async ({ page, context }) => {
   await openFile(page, 'a.html').dblclick();
   await activePanel(page).frameLocator('iframe').locator('#draft').fill('报告 A 批注');
