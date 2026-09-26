@@ -6,6 +6,8 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { z, ZodError } from 'zod';
 import { Registry } from './registry.js';
+import { FileUpdates, filterSchema } from './updates.js';
+import { fileVersion } from '../shared/updates.js';
 import { PathPolicy, inside, relative, mime } from './path-policy.js';
 import { AppError } from './errors.js';
 import { describeFile, isTextFile, legacyIds } from './files.js';
@@ -25,6 +27,8 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   const preview = Fastify({ logger: false });
   const clients=new Set<ServerResponse>();
   const emit=(type:string,data:unknown)=>{for(const client of clients){if(client.writableLength>1024*1024){client.end();clients.delete(client);}else client.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);}};
+  const updates=new FileUpdates(registry.directory,policy,()=>registry.data.mounts,()=>emit('file-updates',{}));
+  await updates.load();
   const aliases = new Map<string, {mountId:string;relativePath:string}>();
   const legacyReferences = await readLegacyReferences(registry.directory);
   for (const [id, target] of Object.entries(legacyReferences)) aliases.set(id, parseFileReference(target)!);
@@ -62,7 +66,16 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     const overlap = draft.mounts.find(m => m.projectId === input.projectId && m.id !== input.id && (inside(m.absolutePath, input.absolutePath) || inside(input.absolutePath, m.absolutePath)));
     if (overlap) throw new AppError('OVERLAPPING_MOUNT', '该目录已包含在项目中；可在已有挂载中标记为工具目录', 409, { mountId: overlap.id, toolDirectory: path.relative(overlap.absolutePath, input.absolutePath).split(path.sep).join('/') });
   }
-  async function changed<T>(fn: (draft: RegistryData) => T | Promise<T>) { const result = await registry.mutate(fn); emit('registry-changed',{revision:registry.data.revision}); return result; }
+  async function changed<T>(fn: (draft: RegistryData) => T | Promise<T>) { const before=JSON.stringify(registry.data.mounts);const result = await registry.mutate(fn); if(before!==JSON.stringify(registry.data.mounts))updates.scheduleSync();emit('registry-changed',{revision:registry.data.revision}); return result; }
+  main.get('/api/file-updates',async()=>updates.snapshot());
+  main.put('/api/file-updates/filter',async req=>{
+    const input=z.object({filter:filterSchema,initializeOnly:z.boolean().optional()}).parse(req.body);
+    return updates.configure(input.filter,input.initializeOnly);
+  });
+  main.post('/api/file-updates/read',async req=>{
+    const input=z.union([z.object({id:z.string().min(1),version:z.string().min(1)}).strict(),z.object({through:z.number().int().nonnegative()}).strict()]).parse(req.body);
+    return updates.acknowledge(input);
+  });
   main.get('/api/status', async () => ({ previewOrigin, revision: registry.data.revision, schemaVersion: 1, navigation: 'files' }));
   main.get('/api/legacy-files', async () => legacyReferences);
   main.get('/api/events',async(req,reply)=>{
@@ -149,7 +162,8 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     if(file.stat.isDirectory()) throw new AppError('INVALID_PATH','不能把目录作为文本读取');
     if(file.stat.size>10*1024*1024) throw new AppError('FILE_TOO_LARGE','文本超过 10 MiB，请使用下载入口',413);
     if(!isTextFile(file.real)) throw new AppError('NOT_TEXT','此文件不是支持的文本类型',415);
-    return {text:await fs.readFile(file.real,'utf8'),size:file.stat.size,updatedAt:file.stat.mtimeMs};
+    const text=await fs.readFile(file.real,'utf8');const after=await fs.stat(file.real);
+    return {text,size:file.stat.size,updatedAt:file.stat.mtimeMs,...(fileVersion(file.stat)===fileVersion(after)?{fileVersion:fileVersion(after)}:{})};
   });
   main.get<{Params:{id:string};Querystring:{path:string}}>('/api/mounts/:id/download',async(req,reply)=>{
     const file=await policy.resolve(mount(req.params.id),req.query.path,false,'file');
@@ -164,6 +178,8 @@ export async function createWorkbench(options: { stateDir: string; port: number;
       rel = rel ? `${rel.replace(/\/$/,'')}/index.html` : 'index.html'; file = await policy.resolve(m, rel);
     }
     const extension = path.extname(file.real).toLowerCase();
+    const requestedVersion=new URL(req.url,previewOrigin).searchParams.get('fileVersion');
+    if(requestedVersion&&requestedVersion!==fileVersion(file.stat))throw new AppError('FILE_CHANGED','文件已再次更新，请重新加载',409);
     if (extension === '.html' || extension === '.htm') {
       const html = await prepareHtmlBridge(file.real, file.stat.size);
       reply.type(html.contentType).header('Content-Length', html.contentLength);
@@ -189,9 +205,9 @@ export async function createWorkbench(options: { stateDir: string; port: number;
       return reply.type(mime[path.extname(candidate)] || 'application/octet-stream').send(createReadStream(candidate));
     });
   }
-  return { main, preview, registry, policy, mount, changed, mainOrigin, previewOrigin,
-    async listen() { try { await preview.listen({ port: options.previewPort, host: '127.0.0.1' }); await main.listen({ port: options.port, host: '127.0.0.1' }); } catch (e) { await vite?.close();await preview.close(); await main.close(); throw e; } },
-    async close() { for(const c of clients)c.end();clients.clear();await vite?.close(); await Promise.all([main.close(), preview.close()]); }
+  return { main, preview, registry, policy, mount, changed, updates, mainOrigin, previewOrigin,
+    async listen() { try { await preview.listen({ port: options.previewPort, host: '127.0.0.1' }); await main.listen({ port: options.port, host: '127.0.0.1' }); } catch (e) { await updates.close();await vite?.close();await preview.close(); await main.close(); throw e; } },
+    async close() { for(const c of clients)c.end();clients.clear();await updates.close();await vite?.close(); await Promise.all([main.close(), preview.close()]); }
   };
 }
 export type Workbench = Awaited<ReturnType<typeof createWorkbench>>;
