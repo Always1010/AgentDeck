@@ -11,7 +11,7 @@ import { ShortcutHelp } from './ShortcutHelp.js';
 import { Help } from './Help.js';
 import { type PageAction } from './pages.js';
 import { OpenPages, PageTabs, pageTabId } from './PageTabs.js';
-import { initialWorkspace, workspaceReducer, layoutRects, minimumPane, dividerSize, type SplitDirection, type PaneId } from './workspace.js';
+import { initialWorkspace, workspaceReducer, layoutRects, minimumPane, dividerSize, paneIds, type SplitDirection, type PaneId } from './workspace.js';
 import { ReadingLayout } from './ReadingLayout.js';
 import { ThemePicker } from './Theme.js';
 import { isEditing, restoreFocus, shortcutFor } from './shortcuts.js';
@@ -67,6 +67,10 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   const [confirmPaneClose,setConfirmPaneClose]=usePreference('reading.confirm-pane-close',true,isBoolean);
   const [closingPane,setClosingPane]=useState<PaneId|null>(null);
   function activatePane(pane:PaneId){markActivity();dispatchWorkspace({type:'activate',pane});}
+  function revealPane(pane:PaneId){
+    markActivity();
+    dispatchWorkspace(workspace.maximized!==null&&workspace.maximized!==pane?{type:'maximize',pane}:{type:'activate',pane});
+  }
   function splitPane(direction:SplitDirection,pane:PaneId=workspace.active,file?:string){
     const area=document.querySelector('.workspace-pages')?.getBoundingClientRect();
     if(!area)return;
@@ -202,6 +206,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   }
   function cancelPaneClose(){setClosingPane(null);focusPane(workspace.active,workspace.panes[workspace.active].active);}
   function closePreview(id:string,pane:PaneId=workspace.active){closePage(id,pane);}
+  function openFromOverview(pane:PaneId,id:string){revealPane(pane);open(id,false,pane);}
   function toggleSidebar(){const show=!searchActive&&(immersive||collapsed);if(searchActive)finishSearch();if(show&&immersive)setImmersive(false);setCollapsed(!show);restoreFocus(sidebarRef.current);}
   function toggleImmersion(){
     if(!selected&&!immersive)return;
@@ -256,7 +261,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
       <button aria-label="快捷键" title="快捷键" onClick={()=>setHelp(true)}>?</button>
     </div></header>
     <aside className="explorer" aria-label="文件资源浏览器" aria-hidden={hidden}>
-      <OpenPages pages={pages.items} active={selected} snapshot={data} open={open} keep={keepPage} close={closePreview} expanded={openedExpanded} toggle={()=>setOpenedExpanded(!openedExpanded)}/>
+      <OpenPages panes={paneIds(workspace.root).map(id=>({id,pages:workspace.panes[id].items,active:workspace.panes[id].active}))} activePane={workspace.active} snapshot={data} open={openFromOverview} activate={revealPane} keep={(pane,id)=>keepPage(id,pane)} close={(pane,id)=>closePreview(id,pane)} expanded={openedExpanded} toggle={()=>setOpenedExpanded(!openedExpanded)}/>
       <div className="explorer-header"><nav aria-label="浏览视图"><button className={view==='files'?'active':''} onClick={()=>{setView('files');setQuery('');}}>文件</button><button className={view==='favorites'?'active':''} onClick={()=>{setView('favorites');setQuery('');}}>收藏</button><button className={view==='tools'?'active':''} onClick={()=>{setView('tools');setQuery('');}}>工具</button></nav><div className="explorer-actions">{view==='files'&&<FileTypeFilterControl value={fileTypeFilter} onChange={setFileTypeFilter}/>}<button aria-label={view==='tools'?'添加工具':'添加项目'} title={view==='tools'?'添加 HTML 工具':'添加项目 / 挂载目录'} onClick={()=>view==='tools'?setToolPicker(true):setManage('new')}><Icon name="plus"/></button><button aria-label="刷新目录" title="刷新已展开目录" onClick={()=>{void reload();setRefresh(v=>v+1);}}>↻</button></div></div>
       <div className="explorer-search"><input ref={searchRef} aria-label="筛选文件" type="search" placeholder={view==='tools'?'筛选工具':view==='favorites'?'筛选收藏':'筛选已加载文件…'} value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.nativeEvent.isComposing)return;if(e.key==='ArrowDown'||e.key==='Enter'){const first=Array.from(document.querySelectorAll<HTMLButtonElement>('.explorer-scroll .node-main:not(.folder)')).find(el=>el.getClientRects().length);if(first){e.preventDefault();if(e.key==='Enter')first.click();else first.focus();}}}}/></div>
       <div className="explorer-scroll" role="tree" aria-label={view==='files'?'目录与文件':view==='tools'?'常用工具':'收藏文件'} onKeyDown={e=>{
