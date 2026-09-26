@@ -11,10 +11,14 @@ import type { BridgeAction, BridgeConfig } from '../shared/bridge.js';
 import { pagePanelId, pageTabId } from './PageTabs.js';
 const toolbarActionOrder=['refresh','favorite','external','split','source','copy'] as const;
 type ToolbarAction=typeof toolbarActionOrder[number];
-export function Viewer({documentFontSize=14,keyboardActive=true,immersive=false,bridgeConfig,bridgeAction,focused,initialScroll,positionChanged,scope,id,active,titleChanged,tool,toggleTool,favorite,toggleFavorite,navigate,other}:{documentFontSize?:number;keyboardActive?:boolean;immersive?:boolean;bridgeConfig?:BridgeConfig;bridgeAction?:(action:BridgeAction)=>void;focused?:()=>void;initialScroll?:{x:number;y:number};positionChanged?:(position:{x:number;y:number})=>void;scope?:string;other?:()=>void;id:string;active:boolean;titleChanged:(title:string)=>void;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;navigate:(mountId:string,path:string)=>void}) {
+export function Viewer({reloadRequest=0,acknowledge,documentFontSize=14,keyboardActive=true,immersive=false,bridgeConfig,bridgeAction,focused,initialScroll,positionChanged,scope,id,active,titleChanged,tool,toggleTool,favorite,toggleFavorite,navigate,other}:{reloadRequest?:number;acknowledge?:(input:{id:string;version:string})=>Promise<void>;documentFontSize?:number;keyboardActive?:boolean;immersive?:boolean;bridgeConfig?:BridgeConfig;bridgeAction?:(action:BridgeAction)=>void;focused?:()=>void;initialScroll?:{x:number;y:number};positionChanged?:(position:{x:number;y:number})=>void;scope?:string;other?:()=>void;id:string;active:boolean;titleChanged:(title:string)=>void;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;navigate:(mountId:string,path:string)=>void}) {
   const [entry,setEntry]=useState<Entry>();const [text,setText]=useState('');const [source,setSource]=useState(false);
   const [version,setVersion]=useState(0);const [pending,setPending]=useState('');const [error,setError]=useState('');
   const [loading,setLoading]=useState(false);const [settings,setSettings]=useState(false);const [downloadOnly,setDownloadOnly]=useState(false);
+  const [loadedVersion,setLoadedVersion]=useState('');const [htmlLoaded,setHtmlLoaded]=useState(false);
+  const [pageVisible,setPageVisible]=useState(document.visibilityState==='visible');
+  const acknowledged=useRef('');
+  useEffect(()=>{const changed=()=>setPageVisible(document.visibilityState==='visible');document.addEventListener('visibilitychange',changed);return()=>document.removeEventListener('visibilitychange',changed);},[]);
   const [copyStatus,setCopyStatus]=useState('');const [menuPosition,setMenuPosition]=useState({top:0,left:0});
   const [visibleActions,setVisibleActions]=useState<number>(toolbarActionOrder.length);
   useLayoutEffect(()=>{if(immersive)setSettings(false);},[immersive]);
@@ -32,17 +36,25 @@ export function Viewer({documentFontSize=14,keyboardActive=true,immersive=false,
   const titleRef=useRef(titleChanged);titleRef.current=titleChanged;
   useEffect(()=>{if(entry)titleRef.current(entry.title);},[entry?.title]);
   const endpoint=`/api/entries/${encodeURIComponent(id)}`;
-  async function read(e:Entry){return (await api<{text:string}>(`/api/mounts/${e.mountId}/file?path=${encodeURIComponent(e.relativePath)}`)).text;}
-  async function load(){const token=++request.current;setLoading(true);setError('');
+  async function readResult(e:Entry){return api<{text:string;fileVersion?:string}>(`/api/mounts/${e.mountId}/file?path=${encodeURIComponent(e.relativePath)}`);}
+  async function read(e:Entry){return (await readResult(e)).text;}
+  async function load(){const token=++request.current;setLoading(true);setError('');setLoadedVersion('');setHtmlLoaded(false);
     try{const e=await api<Entry>(endpoint);let contents='';let unsupported=false;
-      if(/^html?$/.test(e.format)) {const response=await fetch(e.previewUrl!,{method:'HEAD'});if(!response.ok)throw new Error(`页面 HTTP ${response.status}`);if(sourceRef.current)contents=await read(e);}
-      else try{contents=await read(e);}catch(error){if(error instanceof ApiError && (error.code==='NOT_TEXT'||error.code==='FILE_TOO_LARGE'))unsupported=true;else throw error;}
+      if(/^html?$/.test(e.format)) {const response=await fetch(e.previewUrl!,{method:'HEAD'});if(!response.ok)throw new Error(`页面 HTTP ${response.status}`);if(sourceRef.current){const result=await readResult(e);contents=result.text;e.fileVersion=result.fileVersion;}}
+      else try{const result=await readResult(e);contents=result.text;e.fileVersion=result.fileVersion;}catch(error){if(error instanceof ApiError && (error.code==='NOT_TEXT'||error.code==='FILE_TOO_LARGE'))unsupported=true;else throw error;}
       if(token!==request.current)return;
-      live.current=e;setEntry(e);setText(contents);setDownloadOnly(unsupported);setPending('');setVersion(v=>v+1);
+      live.current=e;setEntry(e);setText(contents);setDownloadOnly(unsupported);setPending('');setVersion(v=>v+1);setLoadedVersion(unsupported?'':e.fileVersion||'');
     }catch(error){if(token===request.current)setError((error as Error).message);}
     finally{if(token===request.current)setLoading(false);}
   }
-  useEffect(()=>{void load();return()=>{request.current++;};},[id]);
+  useEffect(()=>{void load();return()=>{request.current++;};},[id,reloadRequest]);
+  useEffect(()=>{
+    if(!acknowledge||!active||!pageVisible||loading||error||!loadedVersion||downloadOnly)return;
+    if(entry&&/^html?$/.test(entry.format)&&!source&&(!htmlLoaded||bridge.status!=='ready'||bridge.documentVersion!==loadedVersion))return;
+    const key=`${id}:${loadedVersion}`;if(acknowledged.current===key)return;
+    acknowledged.current=key;
+    void acknowledge({id,version:loadedVersion}).catch(()=>{if(acknowledged.current===key)acknowledged.current='';});
+  },[acknowledge,id,active,pageVisible,loading,error,loadedVersion,downloadOnly,htmlLoaded,bridge.status,bridge.documentVersion,source,entry?.format]);
   useEffect(()=>{if(!active)return;let disposed=false;let checking=false;
     async function check(){
       if(checking||document.visibilityState!=='visible'||!live.current)return;checking=true;
@@ -75,7 +87,7 @@ export function Viewer({documentFontSize=14,keyboardActive=true,immersive=false,
     document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',escape,true);window.addEventListener('blur',blur);window.addEventListener('resize',resize);
     return()=>{document.removeEventListener('pointerdown',outside,true);document.removeEventListener('keydown',escape,true);window.removeEventListener('blur',blur);window.removeEventListener('resize',resize);};
   },[settings,active]);
-  async function toggleSource(){if(!entry)return;try{if(!source)setText(await read(entry));setSource(!source);}catch(e){setError((e as Error).message);}}
+  async function toggleSource(){if(!entry)return;try{if(!source){const result=await readResult(entry);setText(result.text);setLoadedVersion(result.fileVersion||'');}setSource(!source);}catch(e){setError((e as Error).message);}}
   async function copyOriginal(){if(!entry)return;try{await navigator.clipboard.writeText(await read(entry));setCopyStatus('已复制原文');window.setTimeout(()=>setCopyStatus(''),2500);}catch(e){setError((e as Error).message);}}
   async function preference(patch:Partial<Entry>){try{await api(`${endpoint}/preferences`,'PATCH',patch);const e=await api<Entry>(endpoint);live.current=e;setEntry(e);}catch(e){setError((e as Error).message);}}
   const download=entry?`/api/mounts/${entry.mountId}/download?path=${encodeURIComponent(entry.relativePath)}`:'';
@@ -108,7 +120,7 @@ export function Viewer({documentFontSize=14,keyboardActive=true,immersive=false,
     {pending&&<div className="notice" role="status">{pending}<button onClick={()=>void load()}>加载更新</button><button onClick={()=>setPending('')}>稍后</button></div>}
     {error&&<div role="alert">{error}<button onClick={()=>void load()}>重试</button></div>}
     {!entry?<div className="empty">{loading?'正在打开文件…':'文件暂不可用。旧收藏可在展开原目录后自动恢复。'}</div>:downloadOnly?<div className="empty"><p>此文件暂不支持文本预览，或超过 10 MiB。</p><a href={download} download>下载原文件</a></div>:<>
-      {/^html?$/.test(entry.format)&&<iframe ref={bridge.frame} onLoad={bridge.onLoad} style={{display:source?'none':undefined}} key={`${id}:${version}`} title={entry.title} src={entry.previewUrl} sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"/>}
+      {/^html?$/.test(entry.format)&&<iframe ref={bridge.frame} onLoad={()=>{bridge.onLoad();setHtmlLoaded(true);}} style={{display:source?'none':undefined}} key={`${id}:${version}`} title={entry.title} src={entry.previewUrl} sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"/>}
       {(source||!/^html?$/.test(entry.format))&&<div className="reader" style={{fontSize:/^html?$/.test(entry.format)?undefined:documentFontSize}} ref={readerRef} onScroll={event=>positionChanged?.({x:event.currentTarget.scrollLeft,y:event.currentTarget.scrollTop})}>{!source&&/^(md|markdown)$/.test(entry.format)?<Markdown text={text} entry={entry} previewOrigin={new URL(entry.previewUrl!).origin} navigate={path=>navigate(entry.mountId,path)}/>:<pre>{text}</pre>}</div>}
     </>}
   </section>;

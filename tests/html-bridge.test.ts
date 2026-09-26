@@ -111,7 +111,9 @@ describe('HTML response injection', () => {
       const url = `/m/${id}/index.html`;
       const get = await app.preview.inject({ url, headers: previewHeaders });
       const head = await app.preview.inject({ method: 'HEAD', url, headers: previewHeaders });
-      expect(get.body).toBe(injectHtmlBridge(html));
+      const stat=await fs.stat(path.join(root,'index.html'));
+      expect(get.body).toContain(`data-file-version="${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}"`);
+      expect(get.body.replace(/ data-file-version="[^"]+"/, '')).toBe(injectHtmlBridge(html));
       expect(Number(get.headers['content-length'])).toBe(Buffer.byteLength(get.body));
       expect(head.headers['content-length']).toBe(get.headers['content-length']); expect(head.body).toBe('');
       expect((await app.preview.inject({ url: bridgeScriptPath, headers: previewHeaders })).body).toBe(htmlBridgeScript(mainOrigin));
@@ -127,7 +129,8 @@ describe('HTML response injection', () => {
         await fs.writeFile(path.join(root, fixture.name), fixture.bytes);
         const served = await app.preview.inject({ url: `/m/${id}/${fixture.name}`, headers: previewHeaders });
         const metadata = await app.preview.inject({ method: 'HEAD', url: `/m/${id}/${fixture.name}`, headers: previewHeaders });
-        const plan = planHtmlBridge(fixture.bytes);
+        const stat=await fs.stat(path.join(root,fixture.name));
+        const plan = planHtmlBridge(fixture.bytes,fixture.bytes.length,`${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`);
         expect(served.headers['content-type']).toBe(`text/html; charset=${fixture.charset}`);
         expect(served.rawPayload).toEqual(Buffer.concat([fixture.bytes.subarray(0, plan.offset), plan.script, fixture.bytes.subarray(plan.offset)]));
         expect(metadata.headers['content-length']).toBe(String(served.rawPayload.length));

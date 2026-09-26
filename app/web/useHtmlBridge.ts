@@ -16,6 +16,7 @@ export function useHtmlBridge({ url, version, config, action, focus, position, p
   const restored = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [status, setStatus] = useState<'waiting' | 'ready' | 'unavailable'>('waiting');
+  const [documentVersion,setDocumentVersion]=useState('');
   const live = useRef({ config, action, focus, position, positionChanged });
   live.current = { config, action, focus, position, positionChanged };
   const origin = url ? new URL(url).origin : '';
@@ -29,7 +30,7 @@ export function useHtmlBridge({ url, version, config, action, focus, position, p
   }
   function configure() { if (session.current) { post('config', { config: live.current.config }); restorePosition(); } }
   function probe() {
-    session.current = ''; setStatus('waiting'); clearTimeout(timer.current);
+    session.current = ''; setStatus('waiting');setDocumentVersion(''); clearTimeout(timer.current);
     post('probe');
     timer.current = setTimeout(() => { if (!session.current) setStatus('unavailable'); }, 2000);
   }
@@ -41,6 +42,7 @@ export function useHtmlBridge({ url, version, config, action, focus, position, p
       const data = event.data;
       if (!data || data.marker !== BRIDGE_MARKER || data.version !== BRIDGE_VERSION || typeof data.session !== 'string' || !data.session || data.session.length > 100) return;
       if (data.type === 'ready') {
+        setDocumentVersion(typeof data.fileVersion==='string'&&data.fileVersion.length<150&&data.path===new URL(url!).pathname?data.fileVersion:'');
         session.current = data.session; clearTimeout(timer.current); setStatus('ready'); configure();
         restorePosition();
         return;
@@ -59,5 +61,5 @@ export function useHtmlBridge({ url, version, config, action, focus, position, p
   }, [url, version]);
   useEffect(configure, [config.mode, config.singles, config.navigation, config.escape, config.active, url, version]);
   function onLoad() { loaded.current = true; probe(); }
-  return { frame, status, onLoad };
+  return { frame, status, onLoad,documentVersion };
 }

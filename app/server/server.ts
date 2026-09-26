@@ -181,7 +181,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     const requestedVersion=new URL(req.url,previewOrigin).searchParams.get('fileVersion');
     if(requestedVersion&&requestedVersion!==fileVersion(file.stat))throw new AppError('FILE_CHANGED','文件已再次更新，请重新加载',409);
     if (extension === '.html' || extension === '.htm') {
-      const html = await prepareHtmlBridge(file.real, file.stat.size);
+      const html = await prepareHtmlBridge(file.real, file.stat.size, fileVersion(file.stat));
       reply.type(html.contentType).header('Content-Length', html.contentLength);
       return req.method === 'HEAD' ? reply.send() : reply.send(html.stream());
     }

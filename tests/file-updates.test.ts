@@ -50,7 +50,9 @@ test('restart preserves unread and detects changes while service was stopped; de
 });
 test('excluded trees and symlinks are not enumerated; disabled and removed mounts stop reporting',async()=>{
   await fs.mkdir(path.join(root,'node_modules'));await fs.writeFile(path.join(root,'node_modules','secret.md'),'hidden');
+  const outside=path.join(temp,'outside');await fs.mkdir(outside);await fs.writeFile(path.join(outside,'linked.md'),'not published');await fs.symlink(outside,path.join(root,'linked'),'junction');
   const read=vi.spyOn(fs,'readdir');await app.updates.configure(filter);expect(read.mock.calls.some(([p])=>String(p).includes('node_modules'))).toBe(false);
+  expect(read.mock.calls.some(([p])=>String(p).includes('linked')||String(p)===outside)).toBe(false);
   await fs.writeFile(path.join(root,'one.md'),'new');await app.updates.reconcile();expect(app.updates.snapshot().total).toBe(1);
   await app.main.inject({method:'PATCH',url:`/api/mounts/${id}`,headers,payload:{enabled:false}});await app.updates.reconcile();expect(app.updates.snapshot().total).toBe(0);
   await fs.writeFile(path.join(root,'paused.md'),'new');await app.main.inject({method:'PATCH',url:`/api/mounts/${id}`,headers,payload:{enabled:true}});await app.updates.reconcile();expect(app.updates.snapshot().items.map(x=>x.relativePath)).toEqual(['one.md']);
@@ -73,3 +75,27 @@ test('removing a mount that failed its first baseline clears its stale error',as
   await app.main.inject({method:'DELETE',url:`/api/mounts/${id}`,headers,payload:{}});await app.updates.reconcile();
   expect(app.updates.snapshot().errors).toEqual([]);
 });
+test('reading before watcher debounce consumes only that loaded version; unread is durable after restart',async()=>{
+  await app.updates.configure(filter);await fs.writeFile(path.join(root,'fast.md'),'read immediately');
+  const id=fileReference(app.registry.data.mounts[0].id,'fast.md');
+  const file=(await app.main.inject({url:`/api/mounts/${app.registry.data.mounts[0].id}/file?path=fast.md`,headers})).json();
+  await app.updates.acknowledge({id,version:file.fileVersion});await app.updates.reconcile();expect(app.updates.snapshot().total).toBe(0);
+  await app.close();app=await createWorkbench(options());await app.updates.reconcile();expect(app.updates.snapshot().total).toBe(0);
+});
+test('corrupt update storage is preserved and reported without replacing it',async()=>{
+  await app.close();const storage=path.join(temp,'state','file-updates.json');await fs.writeFile(storage,'broken');app=await createWorkbench(options());
+  expect(app.updates.snapshot().errors.join(' ')).toContain('原文件已保留');await expect(app.updates.configure(filter)).rejects.toThrow('损坏');
+  expect(await fs.readFile(storage,'utf8')).toBe('broken');
+});
+test('1000-file smoke: idle and a single modification do not enumerate directories; batches remain coalesced',async()=>{
+  await Promise.all(Array.from({length:1000},(_,i)=>fs.writeFile(path.join(root,`report-${i}.md`),`report ${i}`)));
+  const started=performance.now();await app.updates.configure(filter);const baselineMs=Math.round(performance.now()-started);
+  // Windows may deliver directory notifications queued during the initial baseline.
+  await new Promise(resolve=>setTimeout(resolve,1500));await expect.poll(()=>app.updates.snapshot().busy).toBe(false);
+  const listing=vi.spyOn(fs,'readdir');await new Promise(resolve=>setTimeout(resolve,750));expect(listing).not.toHaveBeenCalled();
+  const single=performance.now();await fs.writeFile(path.join(root,'report-0.md'),'changed report');
+  await expect.poll(()=>app.updates.snapshot().total,{timeout:10000}).toBe(1);const singleMs=Math.round(performance.now()-single);expect(listing).not.toHaveBeenCalled();
+  const batch=performance.now();await Promise.all(Array.from({length:100},(_,i)=>fs.writeFile(path.join(root,`batch-${i}.md`),`new ${i}`)));
+  await expect.poll(()=>app.updates.snapshot().total,{timeout:10000}).toBe(101);const batchMs=Math.round(performance.now()-batch);expect(listing).not.toHaveBeenCalled();
+  console.log(JSON.stringify({measurement:'file-updates-1000-files',baselineMs,singleMs,batch100Ms:batchMs,idleDirectoryReads:0,singleAndBatchDirectoryReads:0}));
+},25000);
