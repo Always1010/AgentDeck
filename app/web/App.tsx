@@ -284,7 +284,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
           const mounts=data.mounts.filter(m=>m.projectId===project.id);
           return <div className="project-group" key={project.id}>
             {mounts.length!==1&&<div className="project-heading"><span>{project.name}</span><button aria-label={`管理项目：${project.name}`} onClick={()=>setManage(project.id)}>⋯</button></div>}
-            {mounts.map(m=><Tree key={m.id} initialExpanded={expanded[m.id]} expansionChanged={paths=>setExpanded(previous=>({...previous,[m.id]:paths}))} mount={m} label={mounts.length===1?project.name:m.label} query={query} typeFilter={fileTypeFilter} selected={selected} favorites={favorites} refresh={refresh} open={openFile} internal={open} browserUrl={browserUrl} other={openOther} favorite={favorite} discovered={discovered} manage={mounts.length===1?()=>setManage(project.id):undefined}/>)}
+            {mounts.map(m=><Tree key={m.id} visible={!hidden&&view==='files'} initialExpanded={expanded[m.id]} expansionChanged={paths=>setExpanded(previous=>({...previous,[m.id]:paths}))} mount={m} label={mounts.length===1?project.name:m.label} query={query} typeFilter={fileTypeFilter} selected={selected} favorites={favorites} refresh={refresh} open={openFile} internal={open} browserUrl={browserUrl} other={openOther} favorite={favorite} discovered={discovered} manage={mounts.length===1?()=>setManage(project.id):undefined}/>)}
             {!mounts.length&&<p className="tree-message">尚未挂载目录</p>}
           </div>;
         })}{!data.projects.length&&<div className="catalog-empty"><p>挂载目录后，展开文件夹开始浏览。</p><button onClick={()=>setManage('new')}>添加项目</button></div>}</div>

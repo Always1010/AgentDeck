@@ -5,13 +5,13 @@ import { FileOpenMenu } from './FileOpenMenu.js';
 import { fileTypeVisible, type FileTypeFilter } from './fileExtensions.js';
 
 type Listing = { items?: TreeItem[]; error?: string; loading?: boolean };
-type Props = { initialExpanded?: string[]; expansionChanged?: (paths:string[])=>void; mount: Mount; label: string; query: string; typeFilter: FileTypeFilter; selected: string; favorites: string[]; refresh: number; open: (id: string, keep?: boolean) => void; internal: (id: string) => void; browserUrl: (id: string) => string | undefined; other?: (id: string) => void; favorite: (id: string) => void; discovered: (mount: Mount, items: TreeItem[]) => void; manage?: () => void };
+type Props = { visible: boolean; initialExpanded?: string[]; expansionChanged?: (paths:string[])=>void; mount: Mount; label: string; query: string; typeFilter: FileTypeFilter; selected: string; favorites: string[]; refresh: number; open: (id: string, keep?: boolean) => void; internal: (id: string) => void; browserUrl: (id: string) => string | undefined; other?: (id: string) => void; favorite: (id: string) => void; discovered: (mount: Mount, items: TreeItem[]) => void; manage?: () => void };
 export function FileIcon({name}:{name:string}) {
   const ext = name.split('.').pop()?.toLowerCase();
   const kind = /^(html?|md|markdown|csv)$/.test(ext || '') ? ext : 'file';
   return <span aria-hidden="true" className={`file-icon icon-${kind}`}>{/^html?$/.test(ext || '') ? 'H' : /^(md|markdown)$/.test(ext || '') ? 'M' : ext === 'csv' ? 'C' : '≡'}</span>;
 }
-export function Tree({initialExpanded,expansionChanged,mount,label,query,typeFilter,selected,favorites,refresh,open,internal,browserUrl,other,favorite,discovered,manage}:Props) {
+export function Tree({visible,initialExpanded,expansionChanged,mount,label,query,typeFilter,selected,favorites,refresh,open,internal,browserUrl,other,favorite,discovered,manage}:Props) {
   const [expanded,setExpanded] = useState<Set<string>>(()=>new Set(initialExpanded||[]));
   const [cache,setCache] = useState<Record<string,Listing>>({});
   const live = useRef({expanded,mount,discovered}); live.current = {expanded,mount,discovered};
@@ -29,15 +29,26 @@ export function Tree({initialExpanded,expansionChanged,mount,label,query,typeFil
   }
   useEffect(()=>{
     generation.current++; pending.current.clear(); setCache({});
-    if(mount.enabled) for(const path of live.current.expanded) void load(path);
     return ()=>{generation.current++;pending.current.clear();};
   },[mount.absolutePath,mount.enabled,JSON.stringify(mount.excludes)]);
   useEffect(()=>{
-    if(!mount.enabled)return;
-    for(const path of live.current.expanded) void load(path,true);
-    const timer=setInterval(()=>{if(document.visibilityState==='visible')for(const path of live.current.expanded){const parts=path.split('/');if(path==='' || (live.current.expanded.has('')&&parts.slice(0,-1).every((_,i)=>live.current.expanded.has(parts.slice(0,i+1).join('/')))))void load(path,true);}},4000);
-    return ()=>clearInterval(timer);
-  },[refresh,mount.enabled,mount.absolutePath,JSON.stringify(mount.excludes)]);
+    if(!visible||!mount.enabled)return;
+    let timer:ReturnType<typeof setInterval>|undefined;
+    function refreshExpanded(){
+      if(document.visibilityState!=='visible')return;
+      for(const path of live.current.expanded){
+        const parts=path.split('/');
+        if(path==='' || (live.current.expanded.has('')&&parts.slice(0,-1).every((_,i)=>live.current.expanded.has(parts.slice(0,i+1).join('/')))))void load(path,true);
+      }
+    }
+    function visibilityChanged(){
+      clearInterval(timer);
+      if(document.visibilityState!=='visible')return;
+      refreshExpanded();timer=setInterval(refreshExpanded,4000);
+    }
+    visibilityChanged();document.addEventListener('visibilitychange',visibilityChanged);
+    return ()=>{clearInterval(timer);document.removeEventListener('visibilitychange',visibilityChanged);};
+  },[visible,refresh,mount.enabled,mount.absolutePath,JSON.stringify(mount.excludes)]);
   function toggle(path:string) {
     const next = new Set(expanded);
     if(next.has(path)) next.delete(path); else {next.add(path);if(!cache[path]?.items || cache[path]?.error)void load(path);}
