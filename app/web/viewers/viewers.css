@@ -1,7 +1,7 @@
 .image-viewer{display:flex;flex:1;min-height:0;min-width:0;flex-direction:column}
 .data-viewer-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--border);font-size:12px}
 .data-viewer-controls button{padding:4px 8px}
-.data-viewer-controls button[aria-pressed=true]{background:var(--selected);color:var(--accent)}
+.data-viewer-controls button[aria-pressed=true]{background:var(--accent-soft);color:var(--accent)}
 .image-viewer-stage{flex:1;min-height:0;overflow:auto;padding:16px;background:var(--surface)}
 .image-viewer-stage img{display:block;height:auto;object-fit:contain;margin:0 auto}
 .csv-viewer,.json-viewer{min-width:0}

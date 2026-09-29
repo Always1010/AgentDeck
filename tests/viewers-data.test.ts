@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { dataLimits, formatJson, parseCsv, parseJson } from '../app/web/viewers/data.js';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { CsvViewer } from '../app/web/viewers/DataViewer.js';
 
 describe('CSV preview parsing', () => {
   it('retains leading zeros, formulas and empty cells as strings', () => {
@@ -16,6 +19,11 @@ describe('CSV preview parsing', () => {
     expect(() => parseCsv('x\n'.repeat(dataLimits.rows + 1))).toThrow(/1000 行/);
     expect(() => parseCsv('x,'.repeat(dataLimits.columns))).toThrow(/200 列/);
     expect(() => parseCsv('x'.repeat(dataLimits.characters + 1))).toThrow(/100 万字符/);
+  });
+  it('keeps the rendered cell count bounded for uneven rows', () => {
+    const text = 'one\n'.repeat(999) + Array.from({ length: 200 }, () => 'value').join(',');
+    const html = renderToStaticMarkup(createElement(CsvViewer, { text }));
+    expect(html.match(/<(?:td|th)\b/g)).toHaveLength(2199);
   });
 });
 
