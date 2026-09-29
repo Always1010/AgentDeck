@@ -16,6 +16,7 @@ import { ReadingLayout } from './ReadingLayout.js';
 import { ThemePicker } from './Theme.js';
 import { isEditing, restoreFocus, shortcutFor } from './shortcuts.js';
 import { Dialog } from './Dialog.js';
+import { ClosedPages, type ClosedPage } from './ClosedPages.js';
 import { Settings, isHtmlOpening, type HtmlOpening } from './Settings.js';
 import { isHtmlKeyMode, type HtmlKeyMode } from './useHtmlBridge.js';
 import type { BridgeAction } from '../shared/bridge.js';
@@ -68,6 +69,9 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   const [closeEmpty,setCloseEmpty]=usePreference<'keep'|'remove'>('reading.close-empty','keep',(value):value is 'keep'|'remove'=>value==='keep'||value==='remove');
   const [confirmPaneClose,setConfirmPaneClose]=usePreference('reading.confirm-pane-close',true,isBoolean);
   const [closingPane,setClosingPane]=useState<PaneId|null>(null);
+  const [closedPages, setClosedPages] = useState<ClosedPage[]>([]);
+  const [showClosedPages, setShowClosedPages] = useState(false);
+  const closedSequence = useRef(0);
   function activatePane(pane:PaneId){markActivity();dispatchWorkspace({type:'activate',pane});}
   function revealPane(pane:PaneId){
     markActivity();
@@ -191,8 +195,25 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
     const key=`${workspace.active}:${item.id}`;setUpdateOpen(previous=>({...previous,[key]:(previous[key]||0)+1}));
   }
   function keepPage(id:string,pane:PaneId=workspace.active){dispatchPages({type:'keep',id:aliasesRef.current[id]||id},pane);}
+  function rememberClosed(pane: PaneId, ids: string[]) {
+    const records = ids.flatMap(id => {
+      const page = workspace.panes[pane]?.items.find(item => item.id === id);
+      return page ? [{ key: ++closedSequence.current, id, pane, title: page.title || parseFileReference(id)?.relativePath || id, position: positions.current.get(`${pane}:${id}`) }] : [];
+    });
+    setClosedPages(previous => [...records, ...previous].slice(0, 20));
+  }
+  function reopenClosed(item: ClosedPage) {
+    const pane = workspace.panes[item.pane] ? item.pane : workspace.active;
+    if (item.position && !workspace.panes[pane].items.some(page => page.id === item.id)) positions.current.set(`${pane}:${item.id}`, item.position);
+    setClosedPages(previous => previous.filter(page => page.key !== item.key));
+    setShowClosedPages(false);
+    setImmersive(false);
+    revealPane(pane);
+    open(item.id, true, pane);
+  }
   function closePage(id:string,pane:PaneId=workspace.active){
     if(!id)return;
+    rememberClosed(pane, [id]);
     const action={type:'page' as const,pane,action:{type:'close' as const,id},closeEmpty:closeEmpty==='remove'};
     const next=workspaceReducer(workspace,action);dispatchWorkspace(action);
     if(Object.values(next.panes).every(item=>!item.items.length))setImmersive(false);
@@ -204,6 +225,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   }
   function closeReadingPane(pane:PaneId){
     if(!workspace.panes[pane])return;
+    rememberClosed(pane, workspace.panes[pane].items.map(page => page.id));
     const action={type:'close-pane' as const,pane},next=workspaceReducer(workspace,action);
     for(const key of positions.current.keys())if(key.startsWith(`${pane}:`))positions.current.delete(key);
     dispatchWorkspace(action);setClosingPane(null);
@@ -266,6 +288,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
       <button aria-label="左右分屏" title="左右分屏 · E" onClick={()=>splitPane('columns')}>左右分屏</button>
       <button aria-label={workspace.maximized===null?'最大化当前阅读区':'恢复分屏'} title="最大化 / 恢复 · X" disabled={Object.keys(workspace.panes).length===1} onClick={()=>dispatchWorkspace({type:'maximize',pane:workspace.active})}>{workspace.maximized===null?'最大化':'恢复分屏'}</button>
       <ThemePicker/>
+      <button aria-label="最近关闭" onClick={() => setShowClosedPages(true)}>最近关闭</button>
       <button aria-label="设置" onClick={()=>setSettingsPage(true)}>设置</button>
       <button aria-label="使用帮助" onClick={()=>setGuide(true)}>使用帮助</button>
       <button aria-label="快捷键" title="快捷键" onClick={()=>setHelp(true)}>?</button>
@@ -308,6 +331,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
     {immersive&&<div className="immersion-exit-zone"><button ref={immersionExitRef} className="immersion-exit" aria-label="退出沉浸" title="退出沉浸 · F / Esc" onClick={toggleImmersion}>退出沉浸</button></div>}
     {(saveError||startupError)&&<div className="save-warning" role="alert">{saveError||startupError}{session&&<button onClick={retrySave}>重试保存</button>}</div>}
     {error&&<div className="toast" role="alert">{error}<button onClick={()=>setError('')}>关闭</button></div>}
+    {showClosedPages && <ClosedPages items={closedPages} open={reopenClosed} close={() => setShowClosedPages(false)}/>}
     {manage&&<Management snapshot={data} project={data.projects.find(p=>p.id===manage)} close={()=>setManage(undefined)} saved={()=>{void reload();setRefresh(v=>v+1);}} removed={()=>{void reload();}}/>}
     {toolPicker&&<ToolPicker snapshot={data} close={()=>setToolPicker(false)} saved={()=>void reload()}/>}
     {guide&&<Help snapshot={data} selected={selected} close={()=>setGuide(false)} shortcuts={()=>setHelp(true)}/>}
