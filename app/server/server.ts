@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { z, ZodError } from 'zod';
 import { Registry } from './registry.js';
 import { FileUpdates, filterSchema } from './updates.js';
+import { FileSearch } from './file-search.js';
 import { fileVersion } from '../shared/updates.js';
 import { PathPolicy, inside, relative, mime } from './path-policy.js';
 import { AppError } from './errors.js';
@@ -21,6 +22,7 @@ import { projectInput, mountInput, mountPatch, preferenceSchema, overrideSchema,
 export async function createWorkbench(options: { stateDir: string; port: number; previewPort: number; webDir?: string; dev?: boolean }) {
   const registry = new Registry(path.resolve(options.stateDir)); await registry.load();
   const policy = new PathPolicy(registry.directory);
+  const fileSearch = new FileSearch(policy);
   const mainOrigin = `http://127.0.0.1:${options.port}`;
   const previewOrigin = `http://127.0.0.1:${options.previewPort}`;
   const main = Fastify({ logger: false, bodyLimit: 1024 * 1024 });
@@ -124,6 +126,18 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     return {...e,previewUrl:previewOrigin+previewPath(e.mountId,e.relativePath)};
   }
   main.get<{Params:{id:string}}>('/api/entries/:id',async req=>entry(req.params.id));
+  main.get<{ Params: { id: string } }>('/api/mounts/:id/search', async (req, reply) => {
+    const input = z.object({ path: z.string().default(''), q: z.string().trim().min(1).max(200), cursor: z.string().uuid().optional(), limit: z.coerce.number().int().min(1).max(200).default(100) }).parse(req.query);
+    const abort = new AbortController();
+    const disconnected = () => { if (!reply.raw.writableEnded) abort.abort(); };
+    req.raw.on('aborted', disconnected); reply.raw.on('close', disconnected);
+    try { return await fileSearch.page(mount(req.params.id), input, abort.signal); }
+    finally { req.raw.off('aborted', disconnected); reply.raw.off('close', disconnected); }
+  });
+  main.delete<{ Params: { cursor: string } }>('/api/file-search/:cursor', async req => {
+    await fileSearch.cancel(z.string().uuid().parse(req.params.cursor));
+    return { ok: true };
+  });
   main.get('/api/tools', async () => listTools(registry.data, aliases));
   main.put('/api/tools', async req => {
     const input = z.object({ id: z.string().min(1), title: z.string().trim().min(1).max(200).optional() }).parse(req.body);
@@ -206,8 +220,8 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     });
   }
   return { main, preview, registry, policy, mount, changed, updates, mainOrigin, previewOrigin,
-    async listen() { try { await preview.listen({ port: options.previewPort, host: '127.0.0.1' }); await main.listen({ port: options.port, host: '127.0.0.1' }); } catch (e) { await updates.close();await vite?.close();await preview.close(); await main.close(); throw e; } },
-    async close() { for(const c of clients)c.end();clients.clear();await updates.close();await vite?.close(); await Promise.all([main.close(), preview.close()]); }
+    async listen() { try { await preview.listen({ port: options.previewPort, host: '127.0.0.1' }); await main.listen({ port: options.port, host: '127.0.0.1' }); } catch (e) { await fileSearch.close();await updates.close();await vite?.close();await preview.close(); await main.close(); throw e; } },
+    async close() { for(const c of clients)c.end();clients.clear();await fileSearch.close();await updates.close();await vite?.close(); await Promise.all([main.close(), preview.close()]); }
   };
 }
 export type Workbench = Awaited<ReturnType<typeof createWorkbench>>;
