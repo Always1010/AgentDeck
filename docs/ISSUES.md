@@ -270,7 +270,7 @@
 - 现象：HTML 的“查看源码”读取尚未完成时刷新，较晚返回的旧源码可能覆盖新加载的文本与版本，并把查看器切回源码模式；关闭或替换页面后，旧加载仍继续读取。
 - 原因分析：源码读取没有取消或过期校验；原加载序号只在完整请求链末尾阻止写入，没有取消已经失去用途的请求。
 - 解决方案：API 支持 AbortSignal；查看器分别管理文件加载和源码读取，刷新、替换与卸载时取消旧请求，后续读取前及发布结果前检查任务是否仍有效；取消不显示为加载错误。
-- 验证方式：`node node_modules/typescript/bin/tsc --noEmit` 通过；定向 Vitest 2 项通过，覆盖替代读取取消、过期结果守卫与 API 信号透传。新增浏览器回归覆盖“源码读取中刷新”，待统一构建后执行。
+- 验证方式：`node node_modules/typescript/bin/tsc --noEmit` 通过；定向 Vitest 2 项通过，覆盖替代读取取消、过期结果守卫与 API 信号透传。浏览器回归“源码读取中刷新”已通过，确认旧响应不会切回源码模式。
 - 相关文件：app/web/api.ts、app/web/Viewer.tsx、app/web/viewers/requests.ts、tests/viewers-requests.test.ts、tests/e2e/viewers.spec.ts。
 
 
