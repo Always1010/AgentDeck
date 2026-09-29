@@ -16,7 +16,7 @@ import { TextViewer } from './viewers/TextViewer.js';
 import './viewers/viewers.css';
 const toolbarActionOrder=['refresh','favorite','external','split','source','copy'] as const;
 type ToolbarAction=typeof toolbarActionOrder[number];
-export function Viewer({reloadRequest=0,acknowledge,documentFontSize=14,keyboardActive=true,immersive=false,bridgeConfig,bridgeAction,focused,initialScroll,positionChanged,scope,id,active,titleChanged,tool,toggleTool,favorite,toggleFavorite,navigate,other}:{reloadRequest?:number;acknowledge?:(input:{id:string;version:string})=>Promise<void>;documentFontSize?:number;keyboardActive?:boolean;immersive?:boolean;bridgeConfig?:BridgeConfig;bridgeAction?:(action:BridgeAction)=>void;focused?:()=>void;initialScroll?:{x:number;y:number};positionChanged?:(position:{x:number;y:number})=>void;scope?:string;other?:()=>void;id:string;active:boolean;titleChanged:(title:string)=>void;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;navigate:(mountId:string,path:string)=>void}) {
+export function Viewer({fullPath,reveal,reloadRequest=0,acknowledge,documentFontSize=14,keyboardActive=true,immersive=false,bridgeConfig,bridgeAction,focused,initialScroll,positionChanged,scope,id,active,titleChanged,tool,toggleTool,favorite,toggleFavorite,navigate,other}:{fullPath?:string;reveal?:()=>void;reloadRequest?:number;acknowledge?:(input:{id:string;version:string})=>Promise<void>;documentFontSize?:number;keyboardActive?:boolean;immersive?:boolean;bridgeConfig?:BridgeConfig;bridgeAction?:(action:BridgeAction)=>void;focused?:()=>void;initialScroll?:{x:number;y:number};positionChanged?:(position:{x:number;y:number})=>void;scope?:string;other?:()=>void;id:string;active:boolean;titleChanged:(title:string)=>void;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;navigate:(mountId:string,path:string)=>void}) {
   const [entry,setEntry]=useState<Entry>();const [text,setText]=useState('');const [source,setSource]=useState(false);
   const [version,setVersion]=useState(0);const [pending,setPending]=useState('');const [error,setError]=useState('');
   const [loading,setLoading]=useState(false);const [settings,setSettings]=useState(false);const [downloadOnly,setDownloadOnly]=useState(false);
@@ -104,6 +104,7 @@ export function Viewer({reloadRequest=0,acknowledge,documentFontSize=14,keyboard
     finally{if(task.current())setSourceLoading(false);}
   }
   async function copyOriginal(){if(!entry)return;try{await navigator.clipboard.writeText(await read(entry));setCopyStatus('已复制原文');window.setTimeout(()=>setCopyStatus(''),2500);}catch(e){setError((e as Error).message);}}
+  async function copyPath(){if(!fullPath)return;try{await navigator.clipboard.writeText(fullPath);setCopyStatus('已复制完整路径');window.setTimeout(()=>setCopyStatus(''),2500);}catch{setError('未能复制路径，请从更多菜单中选中完整路径后手动复制。');}}
   async function preference(patch:Partial<Entry>){try{await api(`${endpoint}/preferences`,'PATCH',patch);const e=await api<Entry>(endpoint);live.current=e;setEntry(e);}catch(e){setError((e as Error).message);}}
   const download=entry?`/api/mounts/${entry.mountId}/download?path=${encodeURIComponent(entry.relativePath)}`:'';
   const actionDetails:Record<ToolbarAction,{label:string;tip:string;icon:IconName;disabled?:boolean;pressed?:boolean;href?:string;run?:()=>void;menuLabel?:string}>={
@@ -124,11 +125,13 @@ export function Viewer({reloadRequest=0,acknowledge,documentFontSize=14,keyboard
       {visibleActions<toolbarActionOrder.length&&<div className="viewer-overflow-actions" role="group" aria-label="收起的工具栏操作">{toolbarActionOrder.slice(visibleActions).map(action=>renderAction(action,true))}</div>}
       {entry&&<>
       <div className="viewer-menu-secondary">
+      {fullPath&&<button onClick={()=>{setSettings(false);void copyPath();}}>复制完整路径</button>}
+      {reveal&&<button onClick={()=>{setSettings(false);reveal();}}>在文件树中定位</button>}
       {/^html?$/.test(entry.format)&&<button aria-pressed={tool} onClick={()=>{setSettings(false);toggleTool();}}><Icon name="tool"/>{tool?'从工具移除':'添加到工具'}</button>}
       {!/^html?$/.test(entry.format)&&!isImageFormat(entry.format)&&!downloadOnly&&<label className="inline"><input type="checkbox" checked={entry.refreshMode==='auto'} onChange={e=>{setSettings(false);void preference({refreshMode:e.target.checked?'auto':'prompt'});}}/>自动更新文本</label>}
       <button onClick={()=>{setSettings(false);const title=prompt('显示名称',entry.title);if(title)void preference({title});}}>显示名称</button><a href={download} download onClick={()=>setSettings(false)}>下载原文件</a>
       {/^html?$/.test(entry.format)&&<label className="menu-select">此 HTML 快捷键<select value={keyOverride} onChange={event=>{setKeyOverride(event.target.value as 'inherit'|HtmlKeyMode);setSettings(false);}}><option value="inherit">跟随全局设置</option><option value="web">网页优先</option><option value="workbench">工作台优先</option></select></label>}
-      <span className="muted">{entry.relativePath}</span>
+      <span className="muted">{fullPath||entry.relativePath}</span>
       </div>
     </>}</div>,document.body)}
     {entry&&/^html?$/.test(entry.format)&&active&&!source&&<div className="bridge-state" data-bridge-status={bridge.status} aria-live="polite">{effectiveConfig.mode==='web'?'网页快捷键优先':bridge.status==='ready'?'工作台快捷键优先':bridge.status==='waiting'?'正在连接页面快捷键…':'当前页面未接管快捷键，可使用工作台按钮'}</div>}

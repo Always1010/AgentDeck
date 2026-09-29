@@ -77,3 +77,22 @@ test('continuous scrolling coalesces storage writes and visibility flush capture
   await page.reload();
   await expect.poll(() => reader.evaluate(element => element.scrollTop)).toBeGreaterThanOrEqual(590);
 });
+
+test('reveals a deep favorite without loading unrelated directories and copies its full path', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const snapshot = await json(page, '/api/projects');
+  const id = `file:${snapshot.mounts[0].id}:nested/detail.md`;
+  await page.evaluate(id => { localStorage.setItem('favorites', JSON.stringify([id])); }, id);
+  await page.reload();
+  await page.getByRole('button', { name: '收藏', exact: true }).click();
+  await page.getByRole('treeitem', { name: 'detail.md', exact: true }).click();
+  await page.getByRole('button', { name: '更多设置', exact: true }).click();
+  await page.getByRole('button', { name: '复制完整路径', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(path.join(snapshot.mounts[0].absolutePath, 'nested', 'detail.md'));
+  const requested: string[] = [];
+  page.on('request', request => { const url = new URL(request.url()); if (url.pathname.endsWith('/tree')) requested.push(url.searchParams.get('path') || ''); });
+  await page.getByRole('button', { name: '更多设置', exact: true }).click();
+  await page.getByRole('button', { name: '在文件树中定位', exact: true }).click();
+  await expect(page.getByRole('treeitem', { name: 'detail.md', exact: true })).toBeFocused();
+  expect(requested.every(directory => directory === '' || directory === 'nested')).toBe(true);
+});

@@ -5,13 +5,17 @@ import { FileOpenMenu } from './FileOpenMenu.js';
 import { fileTypeVisible, type FileTypeFilter } from './fileExtensions.js';
 
 type Listing = { items?: TreeItem[]; error?: string; loading?: boolean };
-type Props = { visible: boolean; initialExpanded?: string[]; expansionChanged?: (paths:string[])=>void; mount: Mount; label: string; query: string; typeFilter: FileTypeFilter; selected: string; favorites: string[]; refresh: number; open: (id: string, keep?: boolean) => void; internal: (id: string) => void; browserUrl: (id: string) => string | undefined; other?: (id: string) => void; favorite: (id: string) => void; discovered: (mount: Mount, items: TreeItem[]) => void; manage?: () => void };
+export type RevealRequest = { path: string; sequence: number };
+type Props = { revealRequest?: RevealRequest; visible: boolean; initialExpanded?: string[]; expansionChanged?: (paths:string[])=>void; mount: Mount; label: string; query: string; typeFilter: FileTypeFilter; selected: string; favorites: string[]; refresh: number; open: (id: string, keep?: boolean) => void; internal: (id: string) => void; browserUrl: (id: string) => string | undefined; other?: (id: string) => void; favorite: (id: string) => void; discovered: (mount: Mount, items: TreeItem[]) => void; manage?: () => void };
 export function FileIcon({name}:{name:string}) {
   const ext = name.split('.').pop()?.toLowerCase();
   const kind = /^(html?|md|markdown|csv)$/.test(ext || '') ? ext : 'file';
   return <span aria-hidden="true" className={`file-icon icon-${kind}`}>{/^html?$/.test(ext || '') ? 'H' : /^(md|markdown)$/.test(ext || '') ? 'M' : ext === 'csv' ? 'C' : '≡'}</span>;
 }
-export function Tree({visible,initialExpanded,expansionChanged,mount,label,query,typeFilter,selected,favorites,refresh,open,internal,browserUrl,other,favorite,discovered,manage}:Props) {
+export function Tree({revealRequest,visible,initialExpanded,expansionChanged,mount,label,query,typeFilter,selected,favorites,refresh,open,internal,browserUrl,other,favorite,discovered,manage}:Props) {
+  const treeRef = useRef<HTMLDivElement>(null);
+  const [revealTarget, setRevealTarget] = useState('');
+  const revealFocused = useRef(0);
   const [expanded,setExpanded] = useState<Set<string>>(()=>new Set(initialExpanded||[]));
   const [cache,setCache] = useState<Record<string,Listing>>({});
   const live = useRef({expanded,mount,discovered}); live.current = {expanded,mount,discovered};
@@ -49,6 +53,26 @@ export function Tree({visible,initialExpanded,expansionChanged,mount,label,query
     visibilityChanged();document.addEventListener('visibilitychange',visibilityChanged);
     return ()=>{clearInterval(timer);document.removeEventListener('visibilitychange',visibilityChanged);};
   },[visible,refresh,mount.enabled,mount.absolutePath,JSON.stringify(mount.excludes)]);
+  useEffect(() => {
+    if (!revealRequest || !mount.enabled) return;
+    const parts = revealRequest.path.split('/');
+    const ancestors = ['', ...parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join('/'))];
+    const next = new Set([...live.current.expanded, ...ancestors]);
+    setExpanded(next);
+    expansionChanged?.([...next]);
+    setRevealTarget(revealRequest.path);
+    let cancelled = false;
+    void (async () => { for (const ancestor of ancestors) { if (cancelled) return; await load(ancestor); } })();
+    return () => { cancelled = true; };
+  }, [revealRequest?.sequence, mount.enabled]);
+  useEffect(() => {
+    if (!visible || !revealRequest || revealFocused.current === revealRequest.sequence) return;
+    const row = Array.from(treeRef.current?.querySelectorAll<HTMLElement>('[data-file-path]') || []).find(element => element.dataset.filePath === revealTarget);
+    if (!row) return;
+    revealFocused.current = revealRequest.sequence;
+    row.scrollIntoView({ block: 'nearest' });
+    row.querySelector<HTMLButtonElement>('.node-main')?.focus({ preventScroll: true });
+  }, [visible, cache, expanded, revealRequest?.sequence, revealTarget]);
   function toggle(path:string) {
     const next = new Set(expanded);
     if(next.has(path)) next.delete(path); else {next.add(path);if(!cache[path]?.items || cache[path]?.error)void load(path);}
@@ -59,7 +83,7 @@ export function Tree({visible,initialExpanded,expansionChanged,mount,label,query
   function directory(path:string,name:string,depth:number,root=false) {
     const listing=cache[path];
     const opened=expanded.has(path) || !!(term && listing?.items?.some(matches));
-    const visibleItems=listing?.items?.filter(item=>(item.directory||fileTypeVisible(item.name,typeFilter))&&(!term||matches(item)));
+    const visibleItems=listing?.items?.filter(item=>(item.directory||item.relativePath===revealTarget||fileTypeVisible(item.name,typeFilter))&&(!term||matches(item)));
     return <div role="none" key={path}>
       <div className="file-row" style={{paddingLeft:8+depth*14}}>
         <button className="node-main folder" role="treeitem" aria-level={depth+1} aria-expanded={opened} disabled={!mount.enabled} title={root?mount.absolutePath:path} onClick={()=>toggle(path)} onKeyDown={e=>{
@@ -76,7 +100,7 @@ export function Tree({visible,initialExpanded,expansionChanged,mount,label,query
         {visibleItems?.map(item=>{
           if(item.directory)return directory(item.relativePath,item.name,depth+1);
           const id=fileReference(mount.id,item.relativePath);const starred=favorites.includes(id);
-          return <div className={`file-row ${selected===id?'selected':''}`} role="none" key={item.relativePath} style={{paddingLeft:8+(depth+1)*14}}>
+          return <div className={`file-row ${selected===id?'selected':''}`} role="none" key={item.relativePath} data-file-path={item.relativePath} style={{paddingLeft:8+(depth+1)*14}}>
             <button className="node-main" role="treeitem" aria-level={depth+2} aria-selected={selected===id} title={item.relativePath} onClick={event=>{if(event.detail<=1)open(id);}} onDoubleClick={()=>open(id,true)}><FileIcon name={item.name}/><span className="filename">{item.name}</span></button>
             {/\.html?$/i.test(item.name)&&<FileOpenMenu name={item.name} url={browserUrl(id)} internal={()=>internal(id)} other={other?()=>other(id):undefined}/>}
             <button className={`row-action ${starred?'starred':''}`} aria-label={`${starred?'取消收藏':'收藏'}：${item.name}`} onClick={()=>favorite(id)}>{starred?'★':'☆'}</button>
@@ -85,5 +109,5 @@ export function Tree({visible,initialExpanded,expansionChanged,mount,label,query
       </div>}
     </div>;
   }
-  return <div className="mount-tree">{directory('',label,0,true)}</div>;
+  return <div className="mount-tree" ref={treeRef}>{revealTarget&&!fileTypeVisible(revealTarget.split('/').pop()!,typeFilter)&&<p className="tree-message">暂时显示定位文件，原类型筛选保持不变。</p>}{directory('',label,0,true)}</div>;
 }
