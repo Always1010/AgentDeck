@@ -142,3 +142,16 @@ test('cancelled directory search never publishes a late response', async ({ page
   await expect(dialog.getByRole('status')).toContainText('已取消搜索');
   await expect(dialog.locator('.quick-open-results li')).toHaveCount(0);
 });
+
+test('quick open clears results when the selected mount is removed', async ({ page }) => {
+  const snapshot = await json(page, '/api/projects');
+  await page.getByRole('button', { name: '快速打开', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '快速打开', exact: true });
+  await dialog.getByRole('combobox', { name: '查找范围' }).selectOption(snapshot.mounts[0].id);
+  await dialog.getByRole('searchbox', { name: '查找文件' }).fill('detail');
+  await dialog.getByRole('button', { name: '搜索目录', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: /^detail.md/ })).toBeVisible();
+  await json(page, `/api/projects/${snapshot.projects[0].id}`, 'DELETE');
+  await expect(dialog.getByRole('combobox', { name: '查找范围' })).toHaveValue('known');
+  await expect(dialog.locator('.quick-open-results li')).toHaveCount(0);
+});
