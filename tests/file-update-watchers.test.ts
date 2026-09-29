@@ -6,7 +6,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { FileUpdates } from '../app/server/updates.js';
 import { PathPolicy } from '../app/server/path-policy.js';
-import { mountSchema, type Mount } from '../app/shared/model.js';
+import { fileReference, mountSchema, type Mount } from '../app/shared/model.js';
 
 const { watchMock } = vi.hoisted(() => ({ watchMock: vi.fn() }));
 vi.mock('node:fs', async importOriginal => ({
@@ -24,6 +24,7 @@ class FakeWatcher extends EventEmitter {
 
 let temp: string, root: string, nested: string, updates: FileUpdates, mounts: Mount[];
 let watchers: FakeWatcher[];
+let emitted = vi.fn<() => void>();
 const filter = { mode: 'allow' as const, extensions: ['.md'], custom: [] };
 const activeWatcher = (directory: string) => [...watchers].reverse().find(w => w.directory === directory && !w.closed);
 async function settle() {
@@ -54,10 +55,82 @@ beforeEach(async () => {
   const state = path.join(temp, 'state');
   await fs.mkdir(state);
   mounts = [mountSchema.parse({ id: 'mount', projectId: 'project', label: '资料', absolutePath: root })];
-  updates = new FileUpdates(state, new PathPolicy(state), () => mounts, () => {});
+  emitted = vi.fn<() => void>();
+  updates = new FileUpdates(state, new PathPolicy(state), () => mounts, emitted);
   await updates.configure(filter);
   expect(watchers).toHaveLength(3);
   expect(updates.snapshot().errors).toEqual([]);
+});
+
+test('single-file notifications and acknowledgements avoid enumerating the complete record table', async () => {
+  const enumerate = vi.spyOn(Object, 'entries');
+  const recordId = fileReference('mount', 'nested/old.md');
+  await fs.writeFile(path.join(nested, 'old.md'), 'changed report');
+  activeWatcher(nested)!.callback('change', 'old.md');
+  await advance(650);
+  const item = updates.snapshot().items[0];
+  expect(item.id).toBe(recordId);
+  await updates.acknowledge({ id: item.id, version: item.version });
+  expect(updates.snapshot().total).toBe(0);
+  expect(enumerate.mock.calls.some(([value]) => Object.prototype.hasOwnProperty.call(value, recordId))).toBe(false);
+});
+
+test('unchanged reconciliation and repeated acknowledgements neither serialize nor rewrite all state', async () => {
+  const stringify = vi.spyOn(JSON, 'stringify');
+  const write = vi.spyOn(fs, 'writeFile');
+  await updates.reconcile();
+  await updates.acknowledge({ id: fileReference('mount', 'nested/old.md'), version: 'stale-version' });
+  expect(write).not.toHaveBeenCalled();
+  expect(stringify.mock.calls.some(([value]) => value && typeof value === 'object' && 'schemaVersion' in value && 'records' in value)).toBe(false);
+});
+
+test('queued background reconciliations and notifications coalesce without missing an in-flight configuration change', async () => {
+  const readDirectory = fs.readdir;
+  let release!: () => void, entered!: () => void;
+  const paused = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const listing = vi.spyOn(fs, 'readdir');
+  listing.mockImplementationOnce(async (directory, options) => { entered(); await paused; return readDirectory(directory, options); });
+  emitted.mockClear();
+  for (let index = 0; index < 50; index++) updates.scheduleSync();
+  await started;
+  // Mount replacement during a running pass must trigger one follow-up pass.
+  mounts = [{ ...mounts[0], excludes: ['nested'] }];
+  for (let index = 0; index < 50; index++) updates.scheduleSync();
+  release();
+  await settle();
+  // The first pass reads 3 directories, the next sees only the root.
+  expect(listing).toHaveBeenCalledTimes(4);
+  expect(activeWatcher(nested)).toBeUndefined();
+  expect(emitted.mock.calls.length).toBeLessThanOrEqual(4);
+});
+
+test('replacing a directory with a file removes descendant records and rebuilt directories receive fresh records', async () => {
+  await fs.writeFile(path.join(nested, 'leaf', 'deep.md'), 'unread descendant');
+  activeWatcher(nested)!.callback('change', 'leaf');
+  await advance(650);
+  expect(updates.snapshot().total).toBe(1);
+  await fs.rm(nested, { recursive: true, force: true });
+  await fs.writeFile(nested, 'replacement file');
+  activeWatcher(root)!.callback('rename', 'nested');
+  await advance(650);
+  expect(updates.snapshot().total).toBe(0);
+  await fs.unlink(nested); await fs.mkdir(nested); await fs.writeFile(path.join(nested, 'rebuilt.md'), 'new report');
+  activeWatcher(root)!.callback('rename', 'nested');
+  await advance(650);
+  expect(updates.snapshot().items.map(item => item.relativePath)).toEqual(['nested/rebuilt.md']);
+});
+
+test('a failed durable acknowledgement retries its pending state on the next acknowledgement', async () => {
+  await fs.writeFile(path.join(nested, 'old.md'), 'updated report');
+  activeWatcher(nested)!.callback('change', 'old.md'); await advance(650);
+  const item = updates.snapshot().items[0];
+  const write = vi.spyOn(fs, 'writeFile').mockRejectedValueOnce(new Error('storage unavailable'));
+  await expect(updates.acknowledge({ id: item.id, version: item.version })).rejects.toThrow('storage unavailable');
+  await updates.acknowledge({ id: item.id, version: item.version });
+  expect(write).toHaveBeenCalledTimes(2);
+  const saved = JSON.parse(await fs.readFile(path.join(temp, 'state', 'file-updates.json'), 'utf8'));
+  expect(saved.records[item.id].readVersion).toBe(item.version);
 });
 
 afterEach(async () => {
