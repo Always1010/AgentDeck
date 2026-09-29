@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { request } from 'node:http';
 import { createWorkbench, type Workbench } from '../app/server/server.js';
 import { FileSearch } from '../app/server/file-search.js';
 import { fileReference } from '../app/shared/model.js';
@@ -87,4 +88,55 @@ test('batch status keeps input order, deduplicates work and reports per-file fai
   ]);
   expect(resolve).toHaveBeenCalledTimes(3); expect(read).not.toHaveBeenCalled();
   expect((await app.main.inject({ method: 'POST', url: '/api/entries/status', headers, payload: { ids: Array(201).fill(valid) } })).statusCode).toBe(400);
+});
+
+test('continuations cannot change their directory, query or mount and expired cursors release handles', async () => {
+  const changes: Record<string, string>[] = [{ path: 'nested', q: 'alpha' }, { q: 'other' }];
+  for (const changed of changes) {
+    const first = (await search({ q: 'alpha', limit: '1' })).json<FileSearchResult>();
+    expect((await search({ ...changed, cursor: first.nextCursor! })).statusCode).toBe(409);
+  }
+  const initial = (await search({ q: 'alpha', limit: '1' })).json<FileSearchResult>();
+  await app.main.inject({ method: 'POST', url: '/api/projects', headers, payload: { name: 'Other project', mount: { label: 'Same root', absolutePath: root } } });
+  const otherId = app.registry.data.mounts[1].id;
+  expect((await app.main.inject({ url: `/api/mounts/${otherId}/search?q=alpha&cursor=${initial.nextCursor}`, headers })).statusCode).toBe(409);
+
+  const opened = vi.spyOn(fs, 'opendir');
+  const first = (await search({ q: 'alpha', limit: '1' })).json<FileSearchResult>();
+  const handle = await opened.mock.results[0].value;
+  const closed = vi.spyOn(handle, 'close');
+  vi.useFakeTimers({ toFake: ['Date'] });
+  try {
+    vi.setSystemTime(Date.now() + 5 * 60_000 + 1);
+    expect((await search({ q: 'alpha', cursor: first.nextCursor! })).statusCode).toBe(410);
+    expect(closed).toHaveBeenCalledTimes(1);
+  } finally { vi.useRealTimers(); }
+});
+
+test('disconnecting an HTTP search cancels its in-flight page and closes the directory handle', async () => {
+  await app.main.listen({ port: 0, host: '127.0.0.1' });
+  const address = app.main.server.address();
+  if (!address || typeof address === 'string') throw new Error('No test server port');
+  let release!: () => void, entered!: () => void;
+  const paused = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const original = app.policy.resolve.bind(app.policy);
+  vi.spyOn(app.policy, 'resolve').mockImplementation(async (...args) => {
+    const result = await original(...args);
+    if (args[1] === 'Alpha.html') { entered(); await paused; }
+    return result;
+  });
+  const opened = vi.spyOn(fs, 'opendir');
+  const disconnected = new Promise<void>(resolve => app.main.server.once('request', (_request, response) => response.once('close', () => resolve())));
+  const abort = new AbortController();
+  const aborted = new Promise<void>((resolve, reject) => {
+    const client = request({ hostname: '127.0.0.1', port: address.port, path: `/api/mounts/${id}/search?q=alpha&limit=1`, headers, signal: abort.signal }, response => { response.resume(); reject(new Error('Search completed before cancellation')); });
+    client.on('error', error => error.name === 'AbortError' ? resolve() : reject(error));
+    client.end();
+  });
+  await started;
+  const handle = await opened.mock.results[0].value;
+  const closed = vi.spyOn(handle, 'close');
+  abort.abort(); await aborted; await disconnected; release();
+  await expect.poll(() => closed.mock.calls.length).toBe(1);
 });
