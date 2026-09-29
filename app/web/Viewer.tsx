@@ -3,13 +3,17 @@ import { createPortal } from 'react-dom';
 import type { Entry } from '../shared/model.js';
 import { api, ApiError } from './api.js';
 import { Icon, type IconName } from './Icon.js';
-import { Markdown } from './Markdown.js';
 import { restoreFocus, shortcutFor } from './shortcuts.js';
 import { usePreference } from './preferences.js';
 import { useHtmlBridge, type HtmlKeyMode } from './useHtmlBridge.js';
 import type { BridgeAction, BridgeConfig } from '../shared/bridge.js';
 import { pagePanelId, pageTabId } from './PageTabs.js';
 import { LatestRead } from './viewers/requests.js';
+import { isImageFormat, hasTextSource, versionedImageUrl } from './viewers/formats.js';
+import { ImageViewer } from './viewers/ImageViewer.js';
+import { HtmlViewer } from './viewers/HtmlViewer.js';
+import { TextViewer } from './viewers/TextViewer.js';
+import './viewers/viewers.css';
 const toolbarActionOrder=['refresh','favorite','external','split','source','copy'] as const;
 type ToolbarAction=typeof toolbarActionOrder[number];
 export function Viewer({reloadRequest=0,acknowledge,documentFontSize=14,keyboardActive=true,immersive=false,bridgeConfig,bridgeAction,focused,initialScroll,positionChanged,scope,id,active,titleChanged,tool,toggleTool,favorite,toggleFavorite,navigate,other}:{reloadRequest?:number;acknowledge?:(input:{id:string;version:string})=>Promise<void>;documentFontSize?:number;keyboardActive?:boolean;immersive?:boolean;bridgeConfig?:BridgeConfig;bridgeAction?:(action:BridgeAction)=>void;focused?:()=>void;initialScroll?:{x:number;y:number};positionChanged?:(position:{x:number;y:number})=>void;scope?:string;other?:()=>void;id:string;active:boolean;titleChanged:(title:string)=>void;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;navigate:(mountId:string,path:string)=>void}) {
@@ -18,6 +22,7 @@ export function Viewer({reloadRequest=0,acknowledge,documentFontSize=14,keyboard
   const [loading,setLoading]=useState(false);const [settings,setSettings]=useState(false);const [downloadOnly,setDownloadOnly]=useState(false);
   const [loadedVersion,setLoadedVersion]=useState('');const [htmlLoaded,setHtmlLoaded]=useState(false);
   const [sourceLoading,setSourceLoading]=useState(false);
+  const [imageLoaded,setImageLoaded]=useState(false);
   const [pageVisible,setPageVisible]=useState(document.visibilityState==='visible');
   const acknowledged=useRef('');
   useEffect(()=>{const changed=()=>setPageVisible(document.visibilityState==='visible');document.addEventListener('visibilitychange',changed);return()=>document.removeEventListener('visibilitychange',changed);},[]);
@@ -40,9 +45,9 @@ export function Viewer({reloadRequest=0,acknowledge,documentFontSize=14,keyboard
   const endpoint=`/api/entries/${encodeURIComponent(id)}`;
   async function readResult(e:Entry,signal?:AbortSignal){return api<{text:string;fileVersion?:string}>(`/api/mounts/${e.mountId}/file?path=${encodeURIComponent(e.relativePath)}`,'GET',undefined,{signal});}
   async function read(e:Entry){return (await readResult(e)).text;}
-  async function load(){const task=loads.current.begin();sourceReads.current.cancel();setSourceLoading(false);setLoading(true);setError('');setLoadedVersion('');setHtmlLoaded(false);
+  async function load(){const task=loads.current.begin();sourceReads.current.cancel();setSourceLoading(false);setLoading(true);setError('');setLoadedVersion('');setHtmlLoaded(false);setImageLoaded(false);
     try{const e=await api<Entry>(endpoint,'GET',undefined,{signal:task.signal});if(!task.current())return;let contents='';let unsupported=false;
-      if(/^html?$/.test(e.format)) {const response=await fetch(e.previewUrl!,{method:'HEAD',signal:task.signal});if(!task.current())return;if(!response.ok)throw new Error(`页面 HTTP ${response.status}`);if(sourceRef.current){const result=await readResult(e,task.signal);contents=result.text;e.fileVersion=result.fileVersion;}}
+      if(/^html?$/.test(e.format)||isImageFormat(e.format)) {const response=await fetch(e.previewUrl!,{method:'HEAD',signal:task.signal});if(!task.current())return;if(!response.ok)throw new Error(`页面 HTTP ${response.status}`);if(sourceRef.current&&hasTextSource(e.format)){const result=await readResult(e,task.signal);contents=result.text;e.fileVersion=result.fileVersion;}}
       else try{const result=await readResult(e,task.signal);contents=result.text;e.fileVersion=result.fileVersion;}catch(error){if(error instanceof ApiError && (error.code==='NOT_TEXT'||error.code==='FILE_TOO_LARGE'))unsupported=true;else throw error;}
       if(!task.current())return;
       live.current=e;setEntry(e);setText(contents);setDownloadOnly(unsupported);setPending('');setVersion(v=>v+1);setLoadedVersion(unsupported?'':e.fileVersion||'');
@@ -53,15 +58,16 @@ export function Viewer({reloadRequest=0,acknowledge,documentFontSize=14,keyboard
   useEffect(()=>{
     if(!acknowledge||!active||!pageVisible||loading||error||!loadedVersion||downloadOnly)return;
     if(entry&&/^html?$/.test(entry.format)&&!source&&(!htmlLoaded||bridge.status!=='ready'||bridge.documentVersion!==loadedVersion))return;
+    if(entry&&isImageFormat(entry.format)&&!source&&!imageLoaded)return;
     const key=`${id}:${loadedVersion}`;if(acknowledged.current===key)return;
     acknowledged.current=key;
     void acknowledge({id,version:loadedVersion}).catch(()=>{if(acknowledged.current===key)acknowledged.current='';});
-  },[acknowledge,id,active,pageVisible,loading,error,loadedVersion,downloadOnly,htmlLoaded,bridge.status,bridge.documentVersion,source,entry?.format]);
+  },[acknowledge,id,active,pageVisible,loading,error,loadedVersion,downloadOnly,htmlLoaded,imageLoaded,bridge.status,bridge.documentVersion,source,entry?.format]);
   useEffect(()=>{if(!active)return;let disposed=false;let checking=false;
     async function check(){
       if(checking||document.visibilityState!=='visible'||!live.current)return;checking=true;
       try{const current=live.current;const e=await api<Entry>(endpoint);if(disposed||!activeRef.current||current!==live.current)return;
-        if(e.fileVersion!==current.fileVersion){if(current.refreshMode==='auto'&&!/^html?$/.test(current.format))void load();else setPending('文件已更新，点击加载更新。当前页面保持不变。');}
+        if(e.fileVersion!==current.fileVersion){if(current.refreshMode==='auto'&&!/^html?$/.test(current.format)&&!isImageFormat(current.format))void load();else setPending('文件已更新，点击加载更新。当前页面保持不变。');}
       }catch(e){if(!disposed)setPending((e as Error).message);}finally{checking=false;}
     }
     void check();const timer=setInterval(()=>void check(),4000);
@@ -105,8 +111,8 @@ export function Viewer({reloadRequest=0,acknowledge,documentFontSize=14,keyboard
     favorite:{label:favorite?'取消收藏文件':'收藏文件',tip:favorite?'取消收藏':'收藏文件',icon:'star',pressed:favorite,run:toggleFavorite},
     external:{label:'新标签',menuLabel:'在浏览器新标签页打开',tip:'在浏览器新标签页打开',icon:'external',href:entry&&/^html?$/.test(entry.format)?entry.previewUrl:`/preview?entry=${encodeURIComponent(id)}`},
     split:{label:'分屏打开',tip:'在右侧新分屏打开当前文件',icon:'split',disabled:!entry||!other,run:()=>other?.()},
-    source:{label:source?'返回阅读':'查看源码',tip:source?'返回阅读':'查看文件源码',icon:source?'book':'code',disabled:!entry||downloadOnly||loading||sourceLoading,run:()=>void toggleSource()},
-    copy:{label:'复制原文',tip:'复制文件原文',icon:'copy',disabled:!entry||downloadOnly,run:()=>void copyOriginal()},
+    source:{label:source?'返回阅读':'查看源码',tip:source?'返回阅读':'查看文件源码',icon:source?'book':'code',disabled:!entry||downloadOnly||loading||sourceLoading||!hasTextSource(entry.format),run:()=>void toggleSource()},
+    copy:{label:'复制原文',tip:'复制文件原文',icon:'copy',disabled:!entry||downloadOnly||!hasTextSource(entry.format),run:()=>void copyOriginal()},
   };
   function renderAction(action:ToolbarAction,inMenu:boolean){const detail=actionDetails[action];const content=inMenu?detail.menuLabel||detail.label:<Icon name={detail.icon} filled={action==='favorite'&&favorite}/>;
     if(detail.href)return <a key={action} className={inMenu?undefined:'icon-button'} data-toolbar-action={inMenu?undefined:action} data-overflow-action={inMenu?action:undefined} aria-label={inMenu?detail.menuLabel||detail.label:detail.label} data-tooltip={inMenu?undefined:detail.tip} href={detail.href} target="_blank" rel="noopener noreferrer" onClick={()=>{if(inMenu)setSettings(false);}}>{content}</a>;
@@ -119,7 +125,7 @@ export function Viewer({reloadRequest=0,acknowledge,documentFontSize=14,keyboard
       {entry&&<>
       <div className="viewer-menu-secondary">
       {/^html?$/.test(entry.format)&&<button aria-pressed={tool} onClick={()=>{setSettings(false);toggleTool();}}><Icon name="tool"/>{tool?'从工具移除':'添加到工具'}</button>}
-      {!/^html?$/.test(entry.format)&&!downloadOnly&&<label className="inline"><input type="checkbox" checked={entry.refreshMode==='auto'} onChange={e=>{setSettings(false);void preference({refreshMode:e.target.checked?'auto':'prompt'});}}/>自动更新文本</label>}
+      {!/^html?$/.test(entry.format)&&!isImageFormat(entry.format)&&!downloadOnly&&<label className="inline"><input type="checkbox" checked={entry.refreshMode==='auto'} onChange={e=>{setSettings(false);void preference({refreshMode:e.target.checked?'auto':'prompt'});}}/>自动更新文本</label>}
       <button onClick={()=>{setSettings(false);const title=prompt('显示名称',entry.title);if(title)void preference({title});}}>显示名称</button><a href={download} download onClick={()=>setSettings(false)}>下载原文件</a>
       {/^html?$/.test(entry.format)&&<label className="menu-select">此 HTML 快捷键<select value={keyOverride} onChange={event=>{setKeyOverride(event.target.value as 'inherit'|HtmlKeyMode);setSettings(false);}}><option value="inherit">跟随全局设置</option><option value="web">网页优先</option><option value="workbench">工作台优先</option></select></label>}
       <span className="muted">{entry.relativePath}</span>
@@ -129,8 +135,9 @@ export function Viewer({reloadRequest=0,acknowledge,documentFontSize=14,keyboard
     {pending&&<div className="notice" role="status">{pending}<button onClick={()=>void load()}>加载更新</button><button onClick={()=>setPending('')}>稍后</button></div>}
     {error&&<div role="alert">{error}<button onClick={()=>void load()}>重试</button></div>}
     {!entry?<div className="empty">{loading?'正在打开文件…':'文件暂不可用。旧收藏可在展开原目录后自动恢复。'}</div>:downloadOnly?<div className="empty"><p>此文件暂不支持文本预览，或超过 10 MiB。</p><a href={download} download>下载原文件</a></div>:<>
-      {/^html?$/.test(entry.format)&&<iframe ref={bridge.frame} onLoad={()=>{bridge.onLoad();setHtmlLoaded(true);}} style={{display:source?'none':undefined}} key={`${id}:${version}`} title={entry.title} src={entry.previewUrl} sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads"/>}
-      {(source||!/^html?$/.test(entry.format))&&<div className="reader" style={{fontSize:/^html?$/.test(entry.format)?undefined:documentFontSize}} ref={readerRef} onScroll={event=>positionChanged?.({x:event.currentTarget.scrollLeft,y:event.currentTarget.scrollTop})}>{!source&&/^(md|markdown)$/.test(entry.format)?<Markdown text={text} entry={entry} previewOrigin={new URL(entry.previewUrl!).origin} navigate={path=>navigate(entry.mountId,path)} keyboardActive={active&&keyboardActive} shortcutsEnabled={bridgeConfig?.singles??true}/>:<pre>{text}</pre>}</div>}
+      {/^html?$/.test(entry.format)&&<HtmlViewer frame={bridge.frame} loaded={()=>{bridge.onLoad();setHtmlLoaded(true);}} source={source} key={`${id}:${version}`} title={entry.title} url={entry.previewUrl}/>}
+      {isImageFormat(entry.format)&&!source&&<ImageViewer key={`${id}:${version}`} title={entry.title} url={versionedImageUrl(entry.previewUrl!,loadedVersion)} loaded={()=>setImageLoaded(true)}/>}
+      {(source||(!/^html?$/.test(entry.format)&&!isImageFormat(entry.format)))&&<div className="reader" style={{fontSize:/^html?$/.test(entry.format)?undefined:documentFontSize}} ref={readerRef} onScroll={event=>positionChanged?.({x:event.currentTarget.scrollLeft,y:event.currentTarget.scrollTop})}><TextViewer text={text} entry={entry} source={source} navigate={path=>navigate(entry.mountId,path)} keyboardActive={active&&keyboardActive} shortcutsEnabled={bridgeConfig?.singles??true}/></div>}
     </>}
   </section>;
 }
