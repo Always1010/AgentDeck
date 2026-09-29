@@ -4,3 +4,15 @@
 .data-viewer-controls button[aria-pressed=true]{background:var(--selected);color:var(--accent)}
 .image-viewer-stage{flex:1;min-height:0;overflow:auto;padding:16px;background:var(--surface)}
 .image-viewer-stage img{display:block;height:auto;object-fit:contain;margin:0 auto}
+.csv-viewer,.json-viewer{min-width:0}
+.csv-table-scroll{overflow-x:auto}
+.csv-table-scroll table{border-collapse:collapse;min-width:100%;font-size:13px}
+.csv-table-scroll th,.csv-table-scroll td{padding:6px 10px;border:1px solid var(--border);text-align:left;white-space:pre-wrap;min-width:70px;max-width:480px;overflow-wrap:anywhere;vertical-align:top}
+.csv-table-scroll th{background:var(--surface);font-weight:600}
+.csv-table-scroll .csv-row-number{min-width:36px;width:36px;color:var(--muted);font-weight:400;text-align:right}
+.data-viewer-message{padding:16px;line-height:1.7}
+.json-tree,.json-formatted{padding:12px;font-family:ui-monospace,Consolas,monospace;font-size:13px;line-height:1.7}
+.json-toggle{display:block;text-align:left;border:0;background:transparent;color:inherit;font:inherit;padding:1px 0;overflow-wrap:anywhere}
+.json-children{margin-left:16px;padding-left:8px;border-left:1px solid var(--border)}
+.json-value{overflow-wrap:anywhere;white-space:pre-wrap}
+.json-label{color:var(--accent)}

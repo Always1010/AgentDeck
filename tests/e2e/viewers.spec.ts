@@ -19,6 +19,10 @@ test.beforeAll(async () => {
   await fs.writeFile(path.join(root, 'report.html'), '<h1>当前报告</h1><input id="draft">');
   await fs.writeFile(path.join(root, 'diagram.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="400"><rect width="1600" height="400" fill="royalblue"/><script>fetch("/svg-must-not-execute")</script></svg>');
   await fs.writeFile(path.join(root, 'pixel.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhS8AAAAASUVORK5CYII=', 'base64'));
+  await fs.writeFile(path.join(root, 'values.csv'), '编号,备注,金额\r\n001,"含,逗号",3.00\r\n002,"第一行\n第二行",=SUM(A1)');
+  await fs.writeFile(path.join(root, 'values.json'), '{"large":900719925474099312345,"nested":{"zero":-0,"decimal":1.2300e+09},"html":"<img src=x onerror=alert(1)>"}');
+  await fs.writeFile(path.join(root, 'invalid.json'), '{"broken":}');
+  await fs.writeFile(path.join(root, 'large.csv'), 'one\n'.repeat(1002));
 });
 test.afterAll(async () => { await fs.rm(root, { recursive: true, force: true }); });
 test.beforeEach(async ({ page }) => {
@@ -70,4 +74,36 @@ test('images support fit, original size and zoom; SVG is an image with optional 
   await expect(panel(page).getByText('1 × 1')).toBeVisible();
   await expect(panel(page).getByRole('button', { name: '查看源码', exact: true })).toBeDisabled();
   await expect(panel(page).getByRole('button', { name: '复制原文', exact: true })).toBeDisabled();
+});
+
+test('CSV remains literal and JSON formatting preserves integers and number spelling', async ({ page }) => {
+  await file(page, 'values.csv').click();
+  await expect(panel(page).getByRole('table', { name: 'CSV 数据' })).toBeVisible();
+  await expect(panel(page).getByRole('cell', { name: '001', exact: true })).toBeVisible();
+  await expect(panel(page).getByRole('cell', { name: '3.00', exact: true })).toBeVisible();
+  await expect(panel(page).getByRole('cell', { name: '=SUM(A1)', exact: true })).toBeVisible();
+  await panel(page).getByRole('checkbox', { name: '首行作为表头' }).uncheck();
+  await expect(panel(page).getByRole('cell', { name: '编号', exact: true })).toBeVisible();
+  await panel(page).getByRole('button', { name: '查看源码', exact: true }).click();
+  await expect(panel(page).locator('pre')).toContainText('001,"含,逗号",3.00');
+  await file(page, 'values.json').click();
+  await expect(panel(page).locator('.json-tree')).toContainText('900719925474099312345');
+  await panel(page).getByRole('button', { name: /nested/ }).click();
+  await expect(panel(page).locator('.json-tree')).toContainText('1.2300e+09');
+  await panel(page).getByRole('button', { name: '格式化', exact: true }).click();
+  await expect(panel(page).locator('.json-formatted')).toContainText('"large": 900719925474099312345');
+  await expect(panel(page).locator('.json-formatted')).toContainText('"zero": -0');
+  await expect(panel(page).locator('img')).toHaveCount(0);
+  await panel(page).getByRole('button', { name: '查看源码', exact: true }).click();
+  await expect(panel(page).locator('pre')).toHaveText('{"large":900719925474099312345,"nested":{"zero":-0,"decimal":1.2300e+09},"html":"<img src=x onerror=alert(1)>"}');
+});
+
+test('invalid and oversized structured data falls back to explicit raw access', async ({ page }) => {
+  await file(page, 'invalid.json').click();
+  await expect(panel(page).getByRole('status')).toContainText('JSON 格式错误');
+  await panel(page).getByRole('button', { name: '查看源码', exact: true }).click();
+  await expect(panel(page).locator('pre')).toHaveText('{"broken":}');
+  await file(page, 'large.csv').click();
+  await expect(panel(page).getByRole('status')).toContainText('最多支持 1000 行');
+  await expect(panel(page).getByRole('button', { name: '查看源码', exact: true })).toBeEnabled();
 });
