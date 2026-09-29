@@ -9,6 +9,7 @@ import { usePreference } from './preferences.js';
 import { useHtmlBridge, type HtmlKeyMode } from './useHtmlBridge.js';
 import type { BridgeAction, BridgeConfig } from '../shared/bridge.js';
 import { pagePanelId, pageTabId } from './PageTabs.js';
+import { LatestRead } from './viewers/requests.js';
 const toolbarActionOrder=['refresh','favorite','external','split','source','copy'] as const;
 type ToolbarAction=typeof toolbarActionOrder[number];
 export function Viewer({reloadRequest=0,acknowledge,documentFontSize=14,keyboardActive=true,immersive=false,bridgeConfig,bridgeAction,focused,initialScroll,positionChanged,scope,id,active,titleChanged,tool,toggleTool,favorite,toggleFavorite,navigate,other}:{reloadRequest?:number;acknowledge?:(input:{id:string;version:string})=>Promise<void>;documentFontSize?:number;keyboardActive?:boolean;immersive?:boolean;bridgeConfig?:BridgeConfig;bridgeAction?:(action:BridgeAction)=>void;focused?:()=>void;initialScroll?:{x:number;y:number};positionChanged?:(position:{x:number;y:number})=>void;scope?:string;other?:()=>void;id:string;active:boolean;titleChanged:(title:string)=>void;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;navigate:(mountId:string,path:string)=>void}) {
@@ -16,6 +17,7 @@ export function Viewer({reloadRequest=0,acknowledge,documentFontSize=14,keyboard
   const [version,setVersion]=useState(0);const [pending,setPending]=useState('');const [error,setError]=useState('');
   const [loading,setLoading]=useState(false);const [settings,setSettings]=useState(false);const [downloadOnly,setDownloadOnly]=useState(false);
   const [loadedVersion,setLoadedVersion]=useState('');const [htmlLoaded,setHtmlLoaded]=useState(false);
+  const [sourceLoading,setSourceLoading]=useState(false);
   const [pageVisible,setPageVisible]=useState(document.visibilityState==='visible');
   const acknowledged=useRef('');
   useEffect(()=>{const changed=()=>setPageVisible(document.visibilityState==='visible');document.addEventListener('visibilitychange',changed);return()=>document.removeEventListener('visibilitychange',changed);},[]);
@@ -30,24 +32,24 @@ export function Viewer({reloadRequest=0,acknowledge,documentFontSize=14,keyboard
   const [keyOverride,setKeyOverride]=usePreference<'inherit'|HtmlKeyMode>(`html.shortcuts:${id}`,'inherit',(value):value is 'inherit'|HtmlKeyMode=>value==='inherit'||value==='web'||value==='workbench');
   const effectiveConfig:BridgeConfig={mode:keyOverride==='inherit'?bridgeConfig?.mode||'web':keyOverride,singles:bridgeConfig?.singles??true,navigation:bridgeConfig?.navigation??true,escape:!!bridgeConfig?.escape||settings,active:active&&!source&&(bridgeConfig?.active??true)};
   const bridge=useHtmlBridge({url:entry&&/^html?$/.test(entry.format)?entry.previewUrl:undefined,version,config:effectiveConfig,focus:()=>{setSettings(false);focused?.();},action:action=>{if(action==='escape'&&settings){setSettings(false);restoreFocus(settingsButton.current);}else bridgeAction?.(action);},position:initialPosition.current,positionChanged});
-  const settingsButton=useRef<HTMLButtonElement>(null);const request=useRef(0);const live=useRef<Entry | undefined>(undefined);
+  const settingsButton=useRef<HTMLButtonElement>(null);const loads=useRef(new LatestRead());const sourceReads=useRef(new LatestRead());const live=useRef<Entry | undefined>(undefined);
   const sourceRef=useRef(source);sourceRef.current=source;
   const activeRef=useRef(active);activeRef.current=active;
   const titleRef=useRef(titleChanged);titleRef.current=titleChanged;
   useEffect(()=>{if(entry)titleRef.current(entry.title);},[entry?.title]);
   const endpoint=`/api/entries/${encodeURIComponent(id)}`;
-  async function readResult(e:Entry){return api<{text:string;fileVersion?:string}>(`/api/mounts/${e.mountId}/file?path=${encodeURIComponent(e.relativePath)}`);}
+  async function readResult(e:Entry,signal?:AbortSignal){return api<{text:string;fileVersion?:string}>(`/api/mounts/${e.mountId}/file?path=${encodeURIComponent(e.relativePath)}`,'GET',undefined,{signal});}
   async function read(e:Entry){return (await readResult(e)).text;}
-  async function load(){const token=++request.current;setLoading(true);setError('');setLoadedVersion('');setHtmlLoaded(false);
-    try{const e=await api<Entry>(endpoint);let contents='';let unsupported=false;
-      if(/^html?$/.test(e.format)) {const response=await fetch(e.previewUrl!,{method:'HEAD'});if(!response.ok)throw new Error(`页面 HTTP ${response.status}`);if(sourceRef.current){const result=await readResult(e);contents=result.text;e.fileVersion=result.fileVersion;}}
-      else try{const result=await readResult(e);contents=result.text;e.fileVersion=result.fileVersion;}catch(error){if(error instanceof ApiError && (error.code==='NOT_TEXT'||error.code==='FILE_TOO_LARGE'))unsupported=true;else throw error;}
-      if(token!==request.current)return;
+  async function load(){const task=loads.current.begin();sourceReads.current.cancel();setSourceLoading(false);setLoading(true);setError('');setLoadedVersion('');setHtmlLoaded(false);
+    try{const e=await api<Entry>(endpoint,'GET',undefined,{signal:task.signal});if(!task.current())return;let contents='';let unsupported=false;
+      if(/^html?$/.test(e.format)) {const response=await fetch(e.previewUrl!,{method:'HEAD',signal:task.signal});if(!task.current())return;if(!response.ok)throw new Error(`页面 HTTP ${response.status}`);if(sourceRef.current){const result=await readResult(e,task.signal);contents=result.text;e.fileVersion=result.fileVersion;}}
+      else try{const result=await readResult(e,task.signal);contents=result.text;e.fileVersion=result.fileVersion;}catch(error){if(error instanceof ApiError && (error.code==='NOT_TEXT'||error.code==='FILE_TOO_LARGE'))unsupported=true;else throw error;}
+      if(!task.current())return;
       live.current=e;setEntry(e);setText(contents);setDownloadOnly(unsupported);setPending('');setVersion(v=>v+1);setLoadedVersion(unsupported?'':e.fileVersion||'');
-    }catch(error){if(token===request.current)setError((error as Error).message);}
-    finally{if(token===request.current)setLoading(false);}
+    }catch(error){if(task.current())setError((error as Error).message);}
+    finally{if(task.current())setLoading(false);}
   }
-  useEffect(()=>{void load();return()=>{request.current++;};},[id,reloadRequest]);
+  useEffect(()=>{void load();return()=>{loads.current.cancel();sourceReads.current.cancel();};},[id,reloadRequest]);
   useEffect(()=>{
     if(!acknowledge||!active||!pageVisible||loading||error||!loadedVersion||downloadOnly)return;
     if(entry&&/^html?$/.test(entry.format)&&!source&&(!htmlLoaded||bridge.status!=='ready'||bridge.documentVersion!==loadedVersion))return;
@@ -87,7 +89,14 @@ export function Viewer({reloadRequest=0,acknowledge,documentFontSize=14,keyboard
     document.addEventListener('pointerdown',outside,true);document.addEventListener('keydown',escape,true);window.addEventListener('blur',blur);window.addEventListener('resize',resize);
     return()=>{document.removeEventListener('pointerdown',outside,true);document.removeEventListener('keydown',escape,true);window.removeEventListener('blur',blur);window.removeEventListener('resize',resize);};
   },[settings,active]);
-  async function toggleSource(){if(!entry)return;try{if(!source){const result=await readResult(entry);setText(result.text);setLoadedVersion(result.fileVersion||'');}setSource(!source);}catch(e){setError((e as Error).message);}}
+  async function toggleSource(){
+    if(!entry||loading||sourceLoading)return;
+    if(source){sourceReads.current.cancel();setSource(false);return;}
+    const task=sourceReads.current.begin();const current=entry;setSourceLoading(true);
+    try{const result=await readResult(current,task.signal);if(!task.current()||live.current!==current)return;setText(result.text);setLoadedVersion(result.fileVersion||'');setSource(true);}
+    catch(e){if(task.current())setError((e as Error).message);}
+    finally{if(task.current())setSourceLoading(false);}
+  }
   async function copyOriginal(){if(!entry)return;try{await navigator.clipboard.writeText(await read(entry));setCopyStatus('已复制原文');window.setTimeout(()=>setCopyStatus(''),2500);}catch(e){setError((e as Error).message);}}
   async function preference(patch:Partial<Entry>){try{await api(`${endpoint}/preferences`,'PATCH',patch);const e=await api<Entry>(endpoint);live.current=e;setEntry(e);}catch(e){setError((e as Error).message);}}
   const download=entry?`/api/mounts/${entry.mountId}/download?path=${encodeURIComponent(entry.relativePath)}`:'';
@@ -96,7 +105,7 @@ export function Viewer({reloadRequest=0,acknowledge,documentFontSize=14,keyboard
     favorite:{label:favorite?'取消收藏文件':'收藏文件',tip:favorite?'取消收藏':'收藏文件',icon:'star',pressed:favorite,run:toggleFavorite},
     external:{label:'新标签',menuLabel:'在浏览器新标签页打开',tip:'在浏览器新标签页打开',icon:'external',href:entry&&/^html?$/.test(entry.format)?entry.previewUrl:`/preview?entry=${encodeURIComponent(id)}`},
     split:{label:'分屏打开',tip:'在右侧新分屏打开当前文件',icon:'split',disabled:!entry||!other,run:()=>other?.()},
-    source:{label:source?'返回阅读':'查看源码',tip:source?'返回阅读':'查看文件源码',icon:source?'book':'code',disabled:!entry||downloadOnly,run:()=>void toggleSource()},
+    source:{label:source?'返回阅读':'查看源码',tip:source?'返回阅读':'查看文件源码',icon:source?'book':'code',disabled:!entry||downloadOnly||loading||sourceLoading,run:()=>void toggleSource()},
     copy:{label:'复制原文',tip:'复制文件原文',icon:'copy',disabled:!entry||downloadOnly,run:()=>void copyOriginal()},
   };
   function renderAction(action:ToolbarAction,inMenu:boolean){const detail=actionDetails[action];const content=inMenu?detail.menuLabel||detail.label:<Icon name={detail.icon} filled={action==='favorite'&&favorite}/>;
