@@ -247,6 +247,12 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   function cancelPaneClose(){setClosingPane(null);focusPane(workspace.active,workspace.panes[workspace.active].active);}
   function closePreview(id:string,pane:PaneId=workspace.active){closePage(id,pane);}
   function openFromOverview(pane:PaneId,id:string){revealPane(pane);open(id,false,pane);}
+  function quickOpenFile(id: string) {
+    const existing = [workspace.active, ...paneIds(workspace.root).filter(pane => pane !== workspace.active)]
+      .find(pane => workspace.panes[pane].items.some(page => page.id === id));
+    if (existing !== undefined) openFromOverview(existing, id);
+    else openFile(id);
+  }
   function toggleSidebar(){const show=!searchActive&&(immersive||collapsed);if(searchActive)finishSearch();if(show&&immersive)setImmersive(false);setCollapsed(!show);restoreFocus(sidebarRef.current);}
   function toggleImmersion(){
     if(!selected&&!immersive)return;
@@ -341,7 +347,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
     {(saveError||startupError)&&<div className="save-warning" role="alert">{saveError||startupError}{session&&<button onClick={retrySave}>重试保存</button>}</div>}
     {error&&<div className="toast" role="alert">{error}<button onClick={()=>setError('')}>关闭</button></div>}
     {showClosedPages && <ClosedPages items={closedPages} open={reopenClosed} close={() => setShowClosedPages(false)}/>}
-    {showQuickOpen && <QuickOpen snapshot={data} pages={Object.values(workspace.panes).flatMap(pane => pane.items)} favorites={favorites} tools={tools} open={id => openFile(id)} reveal={revealInTree} close={() => setShowQuickOpen(false)}/>}
+    {showQuickOpen && <QuickOpen snapshot={data} pages={Object.values(workspace.panes).flatMap(pane => pane.items)} favorites={favorites} tools={tools} open={quickOpenFile} reveal={revealInTree} close={() => setShowQuickOpen(false)}/>}
     {manage&&<Management snapshot={data} project={data.projects.find(p=>p.id===manage)} close={()=>setManage(undefined)} saved={()=>{void reload();setRefresh(v=>v+1);}} removed={()=>{void reload();}}/>}
     {toolPicker&&<ToolPicker snapshot={data} close={()=>setToolPicker(false)} saved={()=>void reload()}/>}
     {guide&&<Help snapshot={data} selected={selected} close={()=>setGuide(false)} shortcuts={()=>setHelp(true)}/>}

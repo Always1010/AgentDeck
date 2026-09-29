@@ -155,3 +155,18 @@ test('quick open clears results when the selected mount is removed', async ({ pa
   await expect(dialog.getByRole('combobox', { name: '查找范围' })).toHaveValue('known');
   await expect(dialog.locator('.quick-open-results li')).toHaveCount(0);
 });
+
+test('quick open returns to an existing pane without duplicating its live tool', async ({ page }) => {
+  await page.getByRole('treeitem', { name: 'tool.html', exact: true }).dblclick();
+  await page.locator('.reading-pane[data-pane="0"]').frameLocator('iframe').locator('#draft').fill('原阅读区输入');
+  await page.getByRole('button', { name: '左右分屏', exact: true }).click();
+  await page.locator('.reading-pane[data-pane="1"]').getByRole('button', { name: '关闭页面：tool.html', exact: true }).click();
+  await page.getByRole('treeitem', { name: 'reading.md', exact: true }).click();
+  await page.getByRole('button', { name: '快速打开', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '快速打开', exact: true });
+  await dialog.getByRole('searchbox', { name: '查找文件' }).fill('tool');
+  await dialog.getByRole('button', { name: /^tool.html/ }).click();
+  await expect(page.getByRole('tab', { name: 'tool.html', exact: true })).toHaveCount(1);
+  await expect(page.locator('.reading-pane[data-pane="0"]')).toHaveClass(/active/);
+  await expect(page.frameLocator('iframe').locator('#draft')).toHaveValue('原阅读区输入');
+});
