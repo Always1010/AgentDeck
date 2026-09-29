@@ -74,6 +74,11 @@ test('F overlays ordinary maximization and restores the prior sidebar and layout
   await expect(pane(page, 0)).toBeHidden();
   await expect(page.locator('.workspace-header')).toBeHidden();
   await expect(page.locator('.markdown h1').last()).toBeVisible();
+  // The document outline consumes the first Escape before workspace controls.
+  await expect(pane(page, 1).locator('.markdown-toc-frame')).toHaveClass(/is-open/);
+  await page.keyboard.press('Escape');
+  await expect(pane(page, 1).locator('.markdown-toc-frame')).not.toHaveClass(/is-open/);
+  await expect(page.locator('.shell')).toHaveClass(/immersive/);
   await page.keyboard.press('Escape');
   await expect(page.locator('.shell')).not.toHaveClass(/immersive/);
   await expect(pane(page, 0)).toBeHidden();
