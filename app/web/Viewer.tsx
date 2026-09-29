@@ -4,7 +4,7 @@ import type { Entry } from '../shared/model.js';
 import { api, ApiError } from './api.js';
 import { Icon, type IconName } from './Icon.js';
 import { restoreFocus, shortcutFor } from './shortcuts.js';
-import { usePreference } from './preferences.js';
+import { isBoolean, usePreference } from './preferences.js';
 import { useHtmlBridge, type HtmlKeyMode } from './useHtmlBridge.js';
 import type { BridgeAction, BridgeConfig } from '../shared/bridge.js';
 import { pagePanelId, pageTabId } from './PageTabs.js';
@@ -13,6 +13,7 @@ import { isImageFormat, hasTextSource, versionedImageUrl } from './viewers/forma
 import { ImageViewer } from './viewers/ImageViewer.js';
 import { HtmlViewer } from './viewers/HtmlViewer.js';
 import { TextViewer } from './viewers/TextViewer.js';
+import { useResourceWatch } from './viewers/useResourceWatch.js';
 import './viewers/viewers.css';
 const toolbarActionOrder=['refresh','favorite','external','split','source','copy'] as const;
 type ToolbarAction=typeof toolbarActionOrder[number];
@@ -35,6 +36,8 @@ export function Viewer({fullPath,reveal,reloadRequest=0,acknowledge,documentFont
   const initialPosition=useRef(initialScroll);
   useEffect(()=>{if(active&&readerRef.current&&initialPosition.current){readerRef.current.scrollTo(initialPosition.current.x,initialPosition.current.y);initialPosition.current=undefined;}},[text,source,active]);
   const [keyOverride,setKeyOverride]=usePreference<'inherit'|HtmlKeyMode>(`html.shortcuts:${id}`,'inherit',(value):value is 'inherit'|HtmlKeyMode=>value==='inherit'||value==='web'||value==='workbench');
+  const [watchResources,setWatchResources]=usePreference(`html.resource-watch:${id}`,false,isBoolean);
+  const resources=useResourceWatch({entry,enabled:watchResources,active:active&&pageVisible&&!source,generation:version});
   const effectiveConfig:BridgeConfig={mode:keyOverride==='inherit'?bridgeConfig?.mode||'web':keyOverride,singles:bridgeConfig?.singles??true,navigation:bridgeConfig?.navigation??true,escape:!!bridgeConfig?.escape||settings,active:active&&!source&&(bridgeConfig?.active??true)};
   const bridge=useHtmlBridge({url:entry&&/^html?$/.test(entry.format)?entry.previewUrl:undefined,version,config:effectiveConfig,focus:()=>{setSettings(false);focused?.();},action:action=>{if(action==='escape'&&settings){setSettings(false);restoreFocus(settingsButton.current);}else bridgeAction?.(action);},position:initialPosition.current,positionChanged});
   const settingsButton=useRef<HTMLButtonElement>(null);const loads=useRef(new LatestRead());const sourceReads=useRef(new LatestRead());const live=useRef<Entry | undefined>(undefined);
@@ -139,11 +142,14 @@ export function Viewer({fullPath,reveal,reloadRequest=0,acknowledge,documentFont
       {!/^html?$/.test(entry.format)&&!isImageFormat(entry.format)&&!downloadOnly&&<label className="inline"><input type="checkbox" checked={entry.refreshMode==='auto'} onChange={e=>{setSettings(false);void preference({refreshMode:e.target.checked?'auto':'prompt'});}}/>自动更新文本</label>}
       <button onClick={()=>{setSettings(false);const title=prompt('显示名称',entry.title);if(title)void preference({title});}}>显示名称</button><a href={download} download onClick={()=>setSettings(false)}>下载原文件</a>
       {/^html?$/.test(entry.format)&&<label className="menu-select">此 HTML 快捷键<select value={keyOverride} onChange={event=>{setKeyOverride(event.target.value as 'inherit'|HtmlKeyMode);setSettings(false);}}><option value="inherit">跟随全局设置</option><option value="web">网页优先</option><option value="workbench">工作台优先</option></select></label>}
+      {/^html?$/.test(entry.format)&&<><label className="inline"><input type="checkbox" checked={watchResources} onChange={event=>{setWatchResources(event.target.checked);setSettings(false);}}/>提示同目录资源变化</label><span className="muted">可选：只核对本目录中的样式、脚本、图片和数据等文件，不包含子目录，也不判断实际引用关系。</span></>}
       <span className="muted">{fullPath||entry.relativePath}</span>
       </div>
     </>}</div>,document.body)}
     {entry&&/^html?$/.test(entry.format)&&active&&!source&&<div className="bridge-state" data-bridge-status={bridge.status} aria-live="polite">{effectiveConfig.mode==='web'?'网页快捷键优先':bridge.status==='ready'?'工作台快捷键优先':bridge.status==='waiting'?'正在连接页面快捷键…':'当前页面未接管快捷键，可使用工作台按钮'}</div>}
     {pending&&<div className="notice" role="status">{pending}<button onClick={()=>void load()}>加载更新</button><button onClick={()=>setPending('')}>稍后</button></div>}
+    {resources.change&&active&&!source&&<div className="notice" role="status">同目录资源有变化，可能影响当前页面。重新加载前请保存工具输入。<button disabled={loading} onClick={()=>void load()}>重新加载页面</button><button onClick={resources.dismiss}>忽略本次变化</button></div>}
+    {resources.error&&active&&!source&&<div className="notice" role="status">{resources.error}</div>}
     {error&&<div role="alert">{error}<button onClick={()=>void load()}>重试</button></div>}
     {!entry?<div className="empty">{loading?'正在打开文件…':'文件暂不可用。旧收藏可在展开原目录后自动恢复。'}</div>:downloadOnly?<div className="empty"><p>此文件暂不支持文本预览，或超过 10 MiB。</p><a href={download} download>下载原文件</a></div>:<>
       {/^html?$/.test(entry.format)&&<HtmlViewer frame={bridge.frame} loaded={()=>{bridge.onLoad();setHtmlLoaded(true);}} source={source} key={`${id}:${version}`} title={entry.title} url={entry.previewUrl}/>}
