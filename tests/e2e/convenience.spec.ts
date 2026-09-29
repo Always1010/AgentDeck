@@ -119,6 +119,12 @@ test('quick open searches an explicit unloaded directory and reuses an open tool
   await dialog.getByRole('searchbox', { name: '查找文件' }).fill('tool');
   await dialog.getByRole('button', { name: /^tool.html/ }).click();
   await expect(page.frameLocator('iframe').locator('#draft')).toHaveValue('搜索期间保留');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: '快速打开', exact: true }).click();
+  expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.screenshot({ path: 'test-results/quick-open-mobile.png' });
+  await dialog.getByRole('button', { name: '关闭快速打开', exact: true }).click();
+  await expect(page.getByRole('button', { name: '使用帮助', exact: true })).toBeInViewport();
 });
 
 test('cancelled directory search never publishes a late response', async ({ page }) => {

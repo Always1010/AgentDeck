@@ -296,14 +296,16 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   const refs=(view==='tools'?tools:favorites.map(id=>({id,title:''}))).map(({id,title})=>({id,title,ref:parseFileReference(id)})).filter(({id,title,ref})=>`${title} ${ref?.relativePath||id} ${data.mounts.find(m=>m.id===ref?.mountId)?.label||''}`.toLowerCase().includes(query.trim().toLowerCase()));
   return <><div inert={settingsPage||closingPane!==null} className={`shell ${hidden?'sidebar-hidden':''} ${immersive?'immersive':''}`} style={{'--sidebar-width':`${width}px`} as CSSProperties}>
     <header className="workspace-header"><button ref={sidebarRef} className="sidebar-toggle" aria-keyshortcuts={shortcutsEnabled?'b':undefined} title={`${hidden?'展开文件侧栏':'收起文件侧栏'}${shortcutsEnabled?' · B（工作台获得焦点时）':''}`} aria-label={hidden?'展开文件侧栏':'收起文件侧栏'} aria-expanded={!hidden} onClick={toggleSidebar}><Icon name="sidebar"/>{shortcutsEnabled&&<kbd aria-hidden="true">B</kbd>}</button><strong className="brand">AgentDeck</strong><span className="workspace-context">本地文件工作台</span><div className="workspace-actions">
+      <div className="workspace-reading-actions">
       {searchActive&&<button onClick={()=>finishSearch()}>结束筛选</button>}
       <button ref={immersionRef} className="immersion-toggle" disabled={!selected&&!immersive} aria-label={immersive?'退出沉浸':'沉浸'} aria-pressed={immersive} aria-keyshortcuts={shortcutsEnabled?'f':undefined} title={`${immersive?'退出沉浸':'沉浸阅读'}${shortcutsEnabled?' · F（工作台获得焦点时）':''}`} onClick={toggleImmersion}><Icon name={immersive?'collapse':'expand'}/><span>{immersive?'退出沉浸':'沉浸'}</span>{shortcutsEnabled&&<kbd aria-hidden="true">F</kbd>}</button>
       <button aria-label="上下分屏" title="上下分屏 · O" onClick={()=>splitPane('rows')}>上下分屏</button>
       <button aria-label="左右分屏" title="左右分屏 · E" onClick={()=>splitPane('columns')}>左右分屏</button>
       <button aria-label={workspace.maximized===null?'最大化当前阅读区':'恢复分屏'} title="最大化 / 恢复 · X" disabled={Object.keys(workspace.panes).length===1} onClick={()=>dispatchWorkspace({type:'maximize',pane:workspace.active})}>{workspace.maximized===null?'最大化':'恢复分屏'}</button>
-      <ThemePicker/>
       <button aria-label="快速打开" onClick={() => setShowQuickOpen(true)}>快速打开</button>
       <button aria-label="最近关闭" onClick={() => setShowClosedPages(true)}>最近关闭</button>
+      </div>
+      <ThemePicker/>
       <button aria-label="设置" onClick={()=>setSettingsPage(true)}>设置</button>
       <button aria-label="使用帮助" onClick={()=>setGuide(true)}>使用帮助</button>
       <button aria-label="快捷键" title="快捷键" onClick={()=>setHelp(true)}>?</button>
