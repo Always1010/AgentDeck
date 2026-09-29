@@ -77,7 +77,9 @@ npm run background:start
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/windows-background.ps1 -IncludeCrashRecovery
 ```
 
-实际结果见 [后台验收记录](BACKGROUND-TEST-RESULTS.md)。未实现无人登录的系统服务、跨平台后台安装器、无中断更新、自动回滚和日志限额轮转。
+Windows 后台流程已实际验证以下行为：登录任务以当前用户普通权限运行，重复启动保持单一实例；从仓库外工作目录启动仍能定位程序；停止后端口可重新绑定；强制结束受管 Node 子进程后，启动器约一分钟内恢复服务；`background:update` 在构建后重新启动，并保留注册表、项目和挂载标识。相关自动化持续覆盖配置迁移、端口占用、离线目录和进程重启。
+
+这些结果不代表已经实际重启电脑或退出登录，也未覆盖长时间运行、休眠唤醒、电池切换、连续耗尽重试、构建失败回滚和卸载全流程。当前仍不提供无人登录的系统服务、跨平台后台安装器、无中断更新、自动回滚或日志限额轮转。历史验收细节可从 Git 记录追溯，当前总体测试结论见 [验证记录](TEST-RESULTS.md)。
 
 ## 文件浏览器版本升级
 
