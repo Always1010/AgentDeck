@@ -8,6 +8,7 @@ import { z, ZodError } from 'zod';
 import { Registry } from './registry.js';
 import { FileUpdates, filterSchema } from './updates.js';
 import { FileSearch } from './file-search.js';
+import { resourceVersion } from './resource-version.js';
 import type { FileStatusResult } from '../shared/fileOperations.js';
 import { fileVersion } from '../shared/updates.js';
 import { PathPolicy, inside, relative, mime } from './path-policy.js';
@@ -155,6 +156,10 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   main.delete<{ Params: { cursor: string } }>('/api/file-search/:cursor', async req => {
     await fileSearch.cancel(z.string().uuid().parse(req.params.cursor));
     return { ok: true };
+  });
+  main.get<{ Params: { id: string } }>('/api/mounts/:id/resource-version', async req => {
+    const input = z.object({ path: z.string().min(1) }).parse(req.query);
+    return resourceVersion(policy, mount(req.params.id), input.path);
   });
   main.get('/api/tools', async () => listTools(registry.data, aliases));
   main.put('/api/tools', async req => {
