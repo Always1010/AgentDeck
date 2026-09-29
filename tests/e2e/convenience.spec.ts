@@ -96,3 +96,49 @@ test('reveals a deep favorite without loading unrelated directories and copies i
   await expect(page.getByRole('treeitem', { name: 'detail.md', exact: true })).toBeFocused();
   expect(requested.every(directory => directory === '' || directory === 'nested')).toBe(true);
 });
+
+test('quick open searches an explicit unloaded directory and reuses an open tool', async ({ page }) => {
+  await page.getByRole('treeitem', { name: 'tool.html', exact: true }).dblclick();
+  await page.frameLocator('iframe').locator('#draft').fill('搜索期间保留');
+  const snapshot = await json(page, '/api/projects');
+  const searches: string[] = [];
+  page.on('request', request => { if (new URL(request.url()).pathname.endsWith('/search')) searches.push(request.url()); });
+  await page.getByRole('button', { name: '快速打开', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '快速打开', exact: true });
+  await dialog.getByRole('searchbox', { name: '查找文件' }).fill('detail');
+  expect(searches).toHaveLength(0);
+  await dialog.getByRole('combobox', { name: '查找范围' }).selectOption(snapshot.mounts[0].id);
+  await dialog.getByRole('textbox', { name: '目录范围' }).fill('nested');
+  expect(searches).toHaveLength(0);
+  await dialog.getByRole('button', { name: '搜索目录', exact: true }).click();
+  await expect(dialog.getByRole('button', { name: /^detail.md/ })).toBeVisible();
+  expect(new URL(searches[0]).searchParams.get('path')).toBe('nested');
+  await dialog.getByRole('button', { name: /^detail.md/ }).click();
+  await expect(page.locator('.viewer:not([hidden]) .markdown h1')).toHaveText('深层文档');
+  await page.getByRole('button', { name: '快速打开', exact: true }).click();
+  await dialog.getByRole('searchbox', { name: '查找文件' }).fill('tool');
+  await dialog.getByRole('button', { name: /^tool.html/ }).click();
+  await expect(page.frameLocator('iframe').locator('#draft')).toHaveValue('搜索期间保留');
+});
+
+test('cancelled directory search never publishes a late response', async ({ page }) => {
+  const snapshot = await json(page, '/api/projects');
+  let unblock!: () => void;
+  const blocked = new Promise<void>(resolve => { unblock = resolve; });
+  let started!: () => void;
+  const received = new Promise<void>(resolve => { started = resolve; });
+  await page.route('**/api/mounts/*/search?*', async route => {
+    const response = await route.fetch(); started(); await blocked;
+    await route.fulfill({ response }).catch(() => undefined);
+  });
+  await page.getByRole('button', { name: '快速打开', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '快速打开', exact: true });
+  await dialog.getByRole('combobox', { name: '查找范围' }).selectOption(snapshot.mounts[0].id);
+  await dialog.getByRole('searchbox', { name: '查找文件' }).fill('detail');
+  await dialog.getByRole('button', { name: '搜索目录', exact: true }).click();
+  await received;
+  await dialog.getByRole('button', { name: '取消搜索', exact: true }).click();
+  unblock();
+  await expect(dialog.getByRole('status')).toContainText('已取消搜索');
+  await expect(dialog.locator('.quick-open-results li')).toHaveCount(0);
+});
