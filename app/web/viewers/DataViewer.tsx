@@ -19,9 +19,9 @@ export function CsvViewer({ text }: { text: string }) {
     </div>
     <div className="csv-table-scroll"><table aria-label="CSV 数据"><tbody>{rows.map((row, index) => <tr key={index}>
       <th scope="row" className="csv-row-number">{index + 1}</th>
-      {Array.from({ length: columns }, (_, column) => header && index === 0
-        ? <th scope="col" key={column}>{row[column] ?? ''}</th>
-        : <td key={column}>{row[column] ?? ''}</td>)}
+      {row.map((value, column) => header && index === 0
+        ? <th scope="col" key={column}>{value}</th>
+        : <td key={column}>{value}</td>)}
     </tr>)}</tbody></table></div>
   </div>;
 }
