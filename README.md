@@ -196,4 +196,4 @@ npm run test:e2e
 
 浏览器测试在隔离状态和临时目录中使用本机 Edge；正式服务 4410/4411，恢复测试 4420/4421，开发冒烟 4430/4431/4432。非 Windows 可设置 `PLAYWRIGHT_CHANNEL=chromium`。
 
-[测试记录](docs/TEST-RESULTS.md) · [问题日志](docs/ISSUES.md) · [内容输出约定](docs/CONTENT-GUIDE.md)。原 V1 规格与历史实施记录保留用于追溯；当前目录浏览、布局和更新行为以本说明为准。
+[测试记录](docs/TEST-RESULTS.md) · [问题日志](docs/ISSUES.md) · [内容输出约定](docs/CONTENT-GUIDE.md)。当前目录浏览、布局和更新行为以本说明及应用内帮助为准；历史方案可通过 Git 记录追溯。
