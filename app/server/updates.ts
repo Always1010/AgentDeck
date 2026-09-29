@@ -32,47 +32,95 @@ export class FileUpdates {
   private interval?:ReturnType<typeof setInterval>;
   private errors=new Map<string,string>();
   private jobs=0;
-  private saved='';
+  private dirty=false;
+  private unread=new Set<string>();
+  private directoryRecords=new Map<string,Set<string>>();
+  private syncPending=false;
+  private syncRunning=false;
+  private syncAgain=false;
   constructor(private directory:string,private policy:PathPolicy,private mounts:()=>Mount[],private emit:()=>void) {}
   private get file(){return path.join(this.directory,'file-updates.json');}
   async load(){
-    try{this.state=stateSchema.parse(JSON.parse(await fs.readFile(this.file,'utf8')));this.saved=JSON.stringify(this.state);this.initialized=true;}
+    try{this.state=stateSchema.parse(JSON.parse(await fs.readFile(this.file,'utf8')));for(const [id,record] of Object.entries(this.state.records))this.indexRecord(id,record);this.initialized=true;}
     catch(e){if(!missing(e)){this.corrupt=true;this.errors.set('storage','更新记录无法读取，原文件已保留；请检查 file-updates.json。');}}
     if(this.initialized)this.scheduleSync();
     this.interval=setInterval(()=>{if(this.initialized)this.scheduleSync();},5*60_000);this.interval.unref();
   }
   snapshot():UpdatesSnapshot {
     const mounts=new Map(this.mounts().filter(m=>m.enabled).map(m=>[m.id,m]));
-    const items=Object.entries(this.state.records).filter(([,r])=>{
+    const items=[...this.unread].map(id=>[id,this.state.records[id]] as const).filter(([,r])=>{
       const m=mounts.get(r.mountId);return m&&this.state.mounts[m.id]?.mount.absolutePath===m.absolutePath&&r.active&&r.version!==r.readVersion&&!hidden(r.relativePath,m.excludes)&&fileTypeVisible(path.posix.basename(r.relativePath),this.state.filter);
     }).map(([id,r])=>({id,mountId:r.mountId,relativePath:r.relativePath,version:r.version,kind:r.kind,changedAt:r.changedAt,sequence:r.sequence})).sort((a,b)=>b.sequence-a.sequence||a.id.localeCompare(b.id));
     return {initialized:this.initialized,filter:this.state.filter,items:items.slice(0,200),total:items.length,through:this.state.sequence,busy:this.jobs>0,errors:[...new Set([...this.errors.values(),...[...this.recovering.values()].map(r=>r.message)])]};
   }
   private enqueue<T>(task:()=>Promise<T>):Promise<T|undefined>{
     if(this.closed)return Promise.resolve(undefined);
-    this.jobs++;this.emit();
+    this.jobs++;if(this.jobs===1)this.emit();
     const job=this.queue.then(task).then(async result=>{await this.save();return result;});
-    this.queue=job.catch(e=>{this.errors.set('operation',`更新检测失败：${(e as Error).message}`);}).finally(()=>{this.jobs--;this.emit();});
+    this.queue=job.catch(e=>{this.errors.set('operation',`更新检测失败：${(e as Error).message}`);}).finally(()=>{this.jobs--;if(this.jobs===0)this.emit();});
     return job;
   }
   private async save(){
-    if(!this.initialized||this.corrupt)return;
-    const bytes=JSON.stringify(this.state);if(bytes===this.saved)return;
-    try{await fs.writeFile(`${this.file}.tmp`,bytes);await fs.rename(`${this.file}.tmp`,this.file);this.saved=bytes;this.errors.delete('storage');}
+    if(!this.initialized||this.corrupt||!this.dirty)return;
+    const bytes=JSON.stringify(this.state);
+    try{await fs.writeFile(`${this.file}.tmp`,bytes);await fs.rename(`${this.file}.tmp`,this.file);this.dirty=false;this.errors.delete('storage');}
     catch(e){this.errors.set('storage','更新记录保存失败，重启后可能丢失本次未读状态。');throw e;}
   }
   async configure(filter:FileTypeFilter,initializeOnly=false){
     if(this.corrupt)throw new Error('更新记录损坏，请先恢复 file-updates.json');
     await this.enqueue(async()=>{
       if(initializeOnly&&this.initialized)return;
+      if(!this.initialized||JSON.stringify(this.state.filter)!==JSON.stringify(filter))this.dirty=true;
       this.state.filter=structuredClone(filter);this.initialized=true;
       // Save the preference before a potentially long baseline pass.
       await this.save();await this.sync();
     });
     return this.snapshot();
   }
-  scheduleSync(){if(this.initialized&&!this.closed)void this.enqueue(()=>this.sync()).catch(()=>{});}
+  scheduleSync(){
+    if(!this.initialized||this.closed)return;
+    if(this.syncPending){if(this.syncRunning)this.syncAgain=true;return;}
+    this.syncPending=true;
+    void this.enqueue(async()=>{this.syncRunning=true;await this.sync();}).catch(()=>{}).finally(()=>{
+      this.syncPending=false;this.syncRunning=false;
+      if(this.syncAgain){this.syncAgain=false;this.scheduleSync();}
+    });
+  }
   async reconcile(){await this.enqueue(()=>this.sync());}
+  private parentKeys(record:State['records'][string]){
+    const parts=record.relativePath.split('/');
+    return parts.map((_,index)=>fileReference(record.mountId,parts.slice(0,index).join('/')));
+  }
+  private indexRecord(id:string,record:State['records'][string]){
+    for(const key of this.parentKeys(record)){
+      const ids=this.directoryRecords.get(key)||new Set<string>();ids.add(id);this.directoryRecords.set(key,ids);
+    }
+    this.updateUnread(id,record);
+  }
+  private updateUnread(id:string,record:State['records'][string]){
+    if(record.active&&record.version!==record.readVersion)this.unread.add(id);else this.unread.delete(id);
+  }
+  private scopedRecords(mountId:string,scope=''){
+    const key=fileReference(mountId,scope);
+    const ids=[...this.directoryRecords.get(key)||[]];
+    if(this.state.records[key])ids.push(key);
+    return ids.map(id=>[id,this.state.records[id]] as const);
+  }
+  private removeRecord(id:string){
+    const record=this.state.records[id];if(!record)return;
+    for(const key of this.parentKeys(record)){
+      const ids=this.directoryRecords.get(key);ids?.delete(id);if(!ids?.size)this.directoryRecords.delete(key);
+    }
+    this.unread.delete(id);delete this.state.records[id];this.dirty=true;
+  }
+  private deactivate(id:string,record:State['records'][string]){
+    if(record.active){record.active=false;this.dirty=true;}
+    this.unread.delete(id);
+  }
+  private rememberMount(mount:Mount){
+    const value={mount:structuredClone(mount),filter:structuredClone(this.state.filter)};
+    if(JSON.stringify(this.state.mounts[mount.id])!==JSON.stringify(value)){this.state.mounts[mount.id]=value;this.dirty=true;}
+  }
   private dropWatchers(mountId:string,scope='',cancelRecovery=false){
     for(const [key,w] of this.watchers)if(w.mountId===mountId&&under(w.rel,scope)){this.watchers.delete(key);w.watcher.close();}
     if(cancelRecovery)for(const [key,r] of this.recovering)if(r.mountId===mountId&&under(r.rel,scope)){clearTimeout(r.timer);this.recovering.delete(key);}
@@ -147,6 +195,8 @@ export class FileUpdates {
     const sequence=silent?old?.sequence||0:++this.state.sequence;
     this.state.records[id]={mountId:m.id,relativePath:rel,version,readVersion:silent&&!unread?version:old?.readVersion||'',active:true,
       kind:unread?old.kind:old?'modified':'added',changedAt:silent?old?.changedAt||0:Date.now(),sequence};
+    if(old)this.updateUnread(id,this.state.records[id]);else this.indexRecord(id,this.state.records[id]);
+    this.dirty=true;
   }
   private async scan(m:Mount,scope:string,baseline:(rel:string)=>boolean):Promise<boolean>{
     const seen=new Set<string>(),directories=new Set<string>(),failed:string[]=[];
@@ -179,10 +229,10 @@ export class FileUpdates {
     for(const w of this.watchers.values()){
       if(w.mountId===m.id&&under(w.rel,scope)&&!directories.has(w.rel)&&!failed.some(p=>under(w.rel,p)))this.dropWatchers(m.id,w.rel);
     }
-    for(const [id,r] of Object.entries(this.state.records)){
-      if(r.mountId!==m.id||!under(r.relativePath,scope)||failed.some(p=>under(r.relativePath,p)))continue;
-      if(hidden(r.relativePath,m.excludes)||!fileTypeVisible(path.posix.basename(r.relativePath),this.state.filter)){r.active=false;continue;}
-      if(!seen.has(id))delete this.state.records[id];
+    for(const [id,r] of this.scopedRecords(m.id,scope)){
+      if(failed.some(p=>under(r.relativePath,p)))continue;
+      if(hidden(r.relativePath,m.excludes)||!fileTypeVisible(path.posix.basename(r.relativePath),this.state.filter)){this.deactivate(id,r);continue;}
+      if(!seen.has(id))this.removeRecord(id);
     }
     return failed.length===0;
   }
@@ -193,19 +243,19 @@ export class FileUpdates {
     for(const id of this.errors.keys())if(!['operation','storage'].includes(id)&&!mounts.some(m=>m.id===id))this.errors.delete(id);
     for(const w of [...this.watchers.values(),...this.recovering.values()])if(!mounts.some(m=>m.id===w.mountId))this.dropWatchers(w.mountId,'',true);
     for(const id of Object.keys(this.state.mounts))if(!mounts.some(m=>m.id===id)){
-      this.dropWatchers(id,'',true);delete this.state.mounts[id];this.errors.delete(id);
-      for(const [key,r] of Object.entries(this.state.records))if(r.mountId===id)delete this.state.records[key];
+      this.dropWatchers(id,'',true);delete this.state.mounts[id];this.errors.delete(id);this.dirty=true;
+      for(const [key] of this.scopedRecords(id))this.removeRecord(key);
     }
     for(const m of mounts){
       if(this.closed)return;
       const previous=this.state.mounts[m.id];
       const moved=previous&&previous.mount.absolutePath!==m.absolutePath;
-      if(moved){this.dropWatchers(m.id,'',true);for(const [id,r] of Object.entries(this.state.records))if(r.mountId===m.id)delete this.state.records[id];}
-      if(!m.enabled){this.dropWatchers(m.id,'',true);for(const r of Object.values(this.state.records))if(r.mountId===m.id)r.active=false;this.state.mounts[m.id]={mount:structuredClone(m),filter:structuredClone(this.state.filter)};continue;}
+      if(moved){this.dropWatchers(m.id,'',true);for(const [id] of this.scopedRecords(m.id))this.removeRecord(id);}
+      if(!m.enabled){this.dropWatchers(m.id,'',true);for(const [id,r] of this.scopedRecords(m.id))this.deactivate(id,r);this.rememberMount(m);continue;}
       for(const w of [...this.watchers.values(),...this.recovering.values()])if(w.mountId===m.id&&hidden(w.rel,m.excludes))this.dropWatchers(m.id,w.rel,true);
       this.errors.delete(m.id);
       const baseline=(rel:string)=>!previous||!!moved||!previous.mount.enabled||hidden(rel,previous.mount.excludes)||!fileTypeVisible(path.posix.basename(rel),previous.filter);
-      if(await this.scan(m,'',baseline))this.state.mounts[m.id]={mount:structuredClone(m),filter:structuredClone(this.state.filter)};
+      if(await this.scan(m,'',baseline))this.rememberMount(m);
     }
   }
   async acknowledge(input:{id?:string;version?:string;through?:number}){
@@ -219,10 +269,14 @@ export class FileUpdates {
           relative(match[2],false);await this.scan(m,match[2],()=>!this.state.mounts[m.id]);
         }
       }
-      for(const [id,r] of Object.entries(this.state.records)){
+      const records=input.id!==undefined?(this.state.records[input.id]?[[input.id,this.state.records[input.id]] as const]:[]):Object.entries(this.state.records);
+      for(const [id,r] of records){
         const m=this.mounts().find(m=>m.id===r.mountId&&m.enabled);
         if(!m||!r.active||hidden(r.relativePath,m.excludes)||!fileTypeVisible(path.posix.basename(r.relativePath),this.state.filter))continue;
-        if(input.id!==undefined?input.id===id&&input.version===r.version:input.through!==undefined&&r.sequence<=input.through)r.readVersion=r.version;
+        if(input.id!==undefined?input.id===id&&input.version===r.version:input.through!==undefined&&r.sequence<=input.through){
+          if(r.readVersion!==r.version){r.readVersion=r.version;this.dirty=true;}
+          this.updateUnread(id,r);
+        }
       }
     });
     return this.snapshot();
