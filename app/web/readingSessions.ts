@@ -1,4 +1,6 @@
 import type { Workspace } from './workspace.js';
+import type { PendingPersonalPreferences } from './personalBackup.js';
+export const PERSONAL_PREFERENCES_ID = '__agentdeck_pending_personal_preferences__';
 
 export type ReadingSnapshot = {
   version: 1;
@@ -303,3 +305,32 @@ export const listReadingSessions = () => manager().listReadingSessions();
 export const updateReadingSession = (id: string, metadata: ReadingSessionMetadata) => manager().updateReadingSession(id, metadata);
 export const deleteReadingSession = (id: string) => manager().deleteReadingSession(id);
 export const saveReadingCollection = (sourceId: string, name: string) => manager().saveReadingCollection(sourceId, name);
+
+/** Import only new combinations; add() prevents an ID collision from replacing any existing scene. */
+export async function commitPersonalBackup(records: SavedReadingSession[], pending: PendingPersonalPreferences) {
+  const db = await database();
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const store = tx.objectStore(STORE);
+    let failure: unknown;
+    tx.oncomplete = () => resolve();
+    tx.onabort = tx.onerror = () => reject(failure || tx.error || new Error('备份导入失败，原有记录未被修改。'));
+    try {
+      for (const record of records) store.add(record);
+      store.put(pending);
+    } catch (error) { failure = error; tx.abort(); }
+  });
+}
+export const listPersonalBackupRecords = () => browserStore.list();
+export const readPendingPersonalPreferences = () => transaction('readonly', store => store.get(PERSONAL_PREFERENCES_ID));
+export async function clearPendingPersonalPreferences(token: string) {
+  const db = await database();
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const store = tx.objectStore(STORE);
+    const request = store.get(PERSONAL_PREFERENCES_ID);
+    request.onsuccess = () => { if (request.result?.token === token) store.delete(PERSONAL_PREFERENCES_ID); };
+    tx.oncomplete = () => resolve();
+    tx.onabort = tx.onerror = () => reject(tx.error || new Error('个人设置应用状态未能保存。'));
+  });
+}

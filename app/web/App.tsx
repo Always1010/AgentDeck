@@ -29,6 +29,7 @@ import { UnreadFiles } from './UnreadFiles.js';
 import type { FileUpdate } from '../shared/updates.js';
 import { openReadingSession, type ReadingSession, type ReadingSnapshot } from './readingSessions.js';
 import { useReadingPersistence } from './useReadingPersistence.js';
+import { applyPendingPersonalPreferences } from './personalBackupBrowser.js';
 import './style.css';
 import './theme.css';
 const empty:Snapshot={projects:[],mounts:[],revision:0};
@@ -43,10 +44,10 @@ export function App() {
     const params=new URLSearchParams(location.search);
     // A file link opens its own scene. A ws link restores the entire saved scene.
     documentSession ||= openReadingSession(params.get('ws') || (params.has('entry')?crypto.randomUUID():undefined));
-    void documentSession.then(session=>{
+    void Promise.all([documentSession, applyPendingPersonalPreferences()]).then(([session, preferences])=>{
       if(!live)return;
       const url=new URL(location.href);url.searchParams.set('ws',session.id);history.replaceState(null,'',url);
-      setBoot({session,error:''});
+      setBoot({session,error:preferences.error || ''});
     }).catch(error=>{if(live)setBoot({session:null,error:`当前阅读现场无法保存：${(error as Error).message}`});});
     return()=>{live=false;};
   },[]);
