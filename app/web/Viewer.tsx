@@ -38,6 +38,7 @@ export function Viewer({fullPath,reveal,reloadRequest=0,acknowledge,documentFont
   const effectiveConfig:BridgeConfig={mode:keyOverride==='inherit'?bridgeConfig?.mode||'web':keyOverride,singles:bridgeConfig?.singles??true,navigation:bridgeConfig?.navigation??true,escape:!!bridgeConfig?.escape||settings,active:active&&!source&&(bridgeConfig?.active??true)};
   const bridge=useHtmlBridge({url:entry&&/^html?$/.test(entry.format)?entry.previewUrl:undefined,version,config:effectiveConfig,focus:()=>{setSettings(false);focused?.();},action:action=>{if(action==='escape'&&settings){setSettings(false);restoreFocus(settingsButton.current);}else bridgeAction?.(action);},position:initialPosition.current,positionChanged});
   const settingsButton=useRef<HTMLButtonElement>(null);const loads=useRef(new LatestRead());const sourceReads=useRef(new LatestRead());const live=useRef<Entry | undefined>(undefined);
+  const activation=useRef<{id:string;reload:number}|undefined>(undefined);
   const sourceRef=useRef(source);sourceRef.current=source;
   const activeRef=useRef(active);activeRef.current=active;
   const titleRef=useRef(titleChanged);titleRef.current=titleChanged;
@@ -54,7 +55,14 @@ export function Viewer({fullPath,reveal,reloadRequest=0,acknowledge,documentFont
     }catch(error){if(task.current())setError((error as Error).message);}
     finally{if(task.current())setLoading(false);}
   }
-  useEffect(()=>{void load();return()=>{loads.current.cancel();sourceReads.current.cancel();};},[id,reloadRequest]);
+  useEffect(()=>{
+    // Restore tab metadata immediately, but start each document only when first visible.
+    // Once started, keep its iframe alive across tab switches and pane maximization.
+    if(!active&&activation.current?.id!==id)return;
+    if(activation.current?.id===id&&activation.current.reload===reloadRequest)return;
+    activation.current={id,reload:reloadRequest};void load();
+  },[id,reloadRequest,active]);
+  useEffect(()=>()=>{loads.current.cancel();sourceReads.current.cancel();activation.current=undefined;},[id]);
   useEffect(()=>{
     if(!acknowledge||!active||!pageVisible||loading||error||!loadedVersion||downloadOnly)return;
     if(entry&&/^html?$/.test(entry.format)&&!source&&(!htmlLoaded||bridge.status!=='ready'||bridge.documentVersion!==loadedVersion))return;
