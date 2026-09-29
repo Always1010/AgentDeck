@@ -1,0 +1,8 @@
+.reading-collection-form,.reading-session-rename{display:flex;align-items:end;gap:8px;flex-wrap:wrap;margin:14px 0}
+.reading-collection-form label,.reading-session-rename label{flex:1 1 190px;min-width:0}
+.reading-collection-form input,.reading-session-rename input{width:100%;box-sizing:border-box}
+.managed-reading-session{flex-wrap:wrap;gap:12px}
+.reading-session-info{flex:1 1 210px;min-width:0;overflow-wrap:anywhere}
+.reading-session-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.reading-session-actions button{font-size:12px;padding:4px 7px}
+.reading-session-rename{flex-basis:100%;margin:0}

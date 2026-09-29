@@ -23,7 +23,9 @@ function environment(supportsOwnership = true) {
   const store: ReadingSessionStore = {
     get: async id => structuredClone(records.get(id) ?? null),
     list: async () => structuredClone([...records.values()]),
-    put: async record => { records.set(record.id, structuredClone(record)); },
+    put: async record => { records.set(record.id, { ...records.get(record.id) as object, ...structuredClone(record) }); },
+    patch: async (id, metadata) => { records.set(id, { ...records.get(id) as object, ...metadata }); },
+    remove: async id => { records.delete(id); },
   };
   const manager = createReadingSessionManager({
     store,
@@ -277,5 +279,59 @@ test('corruption or read failure discovered after lock acquisition releases owne
     expect(released).toBe(true);
     expect(writes).toBe(0);
   }
+});
+
+test('names and pins survive active snapshot saves without changing default foreground restoration', async () => {
+  const env = environment();
+  const a = await env.openReadingSession();
+  await a.save(snapshot('a'), true);
+  const b = await env.openReadingSession();
+  await b.save(snapshot('b'), true);
+  await env.updateReadingSession(a.id, { name: '  日常阅读  ', pinned: true });
+  await a.save(snapshot('a-new'));
+  const items = await env.listReadingSessions();
+  expect(items[0]).toMatchObject({ id: a.id, name: '日常阅读', pinned: true, inUse: true });
+  const c = await env.openReadingSession();
+  expect(c.snapshot?.workspace.panes[0].active).toBe('b');
+});
+
+test('active scenes cannot be deleted; a closed scene can be removed without affecting other records', async () => {
+  const env = environment();
+  const a = await env.openReadingSession();
+  await a.save(snapshot('a'));
+  await expect(env.deleteReadingSession(a.id)).rejects.toThrow('正在使用');
+  expect(env.records.has(a.id)).toBe(true);
+  a.close();
+  await env.deleteReadingSession(a.id);
+  expect(env.records.has(a.id)).toBe(false);
+  expect(env.owners.has(a.id)).toBe(false);
+});
+
+test('saved combinations always open as independent scenes and never become the automatic default', async () => {
+  const env = environment();
+  const source = await env.openReadingSession();
+  await source.save(snapshot('report-and-tool'), true);
+  const collection = await env.saveReadingCollection(source.id, '固定组合');
+  expect((await env.listReadingSessions())[0]).toMatchObject({ id: collection, pinned: true, collection: true, name: '固定组合' });
+  const first = await env.openReadingSession(collection);
+  const second = await env.openReadingSession(collection);
+  expect(first.id).not.toBe(collection);
+  expect(second.id).not.toBe(first.id);
+  await first.save(snapshot('changed'));
+  expect((await env.store.get(collection) as any).snapshot.workspace.panes[0].active).toBe('report-and-tool');
+  const automatic = await env.openReadingSession();
+  expect(automatic.id).not.toBe(collection);
+  expect(automatic.snapshot?.workspace.panes[0].active).toBe('report-and-tool');
+});
+
+test('invalid names, missing sources and unavailable ownership checks do not delete or create records', async () => {
+  const env = environment(false);
+  const source = await env.openReadingSession();
+  await source.save(snapshot());
+  await expect(env.saveReadingCollection(source.id, ' '.repeat(2))).rejects.toThrow('组合名称');
+  await expect(env.updateReadingSession(source.id, { name: '字'.repeat(121) })).rejects.toThrow('无效');
+  await expect(env.saveReadingCollection('missing', '组合')).rejects.toThrow('尚未保存');
+  await expect(env.deleteReadingSession(source.id)).rejects.toThrow('占用检查');
+  expect(env.records.size).toBe(1);
 });
 
