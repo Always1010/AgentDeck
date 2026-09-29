@@ -13,8 +13,8 @@ export type ReadingSessionSummary = { id: string; updatedAt: number; activeAt: n
 export type ReadingSession = {
   id: string;
   snapshot: ReadingSnapshot | null;
-  /** Only foreground user activity should pass true; background saves must not change recency. */
-  save(snapshot: ReadingSnapshot, activity?: boolean): Promise<void>;
+  /** Pass the time of foreground input, not the later save time. Boolean true is supported for immediate callers. */
+  save(snapshot: ReadingSnapshot, activity?: boolean | number): Promise<void>;
   /** Drains pending writes before releasing ownership. Do not call for a persisted pagehide. */
   close(): void;
 };
@@ -204,9 +204,10 @@ export function createReadingSessionManager(dependencies: Dependencies) {
       save(nextSnapshot, activity = false) {
         if (closed) return Promise.reject(new Error('阅读现场已关闭，未保存后续更改。'));
         if (!validateReadingSnapshot(nextSnapshot)) return Promise.reject(new Error('阅读现场状态无效，原记录已保留。'));
+        if (typeof activity === 'number' && (!Number.isFinite(activity) || activity < 0)) return Promise.reject(new Error('阅读活动时间无效，原记录已保留。'));
         const next = structuredClone(nextSnapshot);
         const now = dependencies.now();
-        if (activity) activeAt = Math.max(activeAt, now);
+        if (activity) activeAt = Math.max(activeAt, typeof activity === 'number' ? activity : now);
         const record = { id, updatedAt: now, activeAt, snapshot: next };
         return new Promise<void>((resolve, reject) => {
           if (pending) { pending.record = record; pending.listeners.push({ resolve, reject }); }

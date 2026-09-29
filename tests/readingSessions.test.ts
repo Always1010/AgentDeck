@@ -104,6 +104,19 @@ test('new pages start from the last foreground activity, even after another scen
   expect(c.id).not.toBe(b.id);
 });
 
+test('a delayed or retried save uses its original input timestamp and cannot overtake a newer foreground scene', async () => {
+  const env = environment();
+  const earlier = await env.openReadingSession();
+  await earlier.save(snapshot('earlier'), true);
+  const earlierActivity = (await env.store.get(earlier.id) as any).activeAt;
+  const latest = await env.openReadingSession();
+  await latest.save(snapshot('latest'), true);
+  await earlier.save(snapshot('later-background-save'), earlierActivity);
+  expect((await env.store.get(earlier.id) as any).activeAt).toBe(earlierActivity);
+  expect((await env.openReadingSession()).snapshot?.workspace.panes[0].active).toBe('latest');
+  await expect(earlier.save(snapshot(), Infinity)).rejects.toThrow('活动时间无效');
+});
+
 test('without exclusive browser locks each document conservatively saves an independent copy', async () => {
   const env = environment(false);
   const a = await env.openReadingSession();
