@@ -135,7 +135,29 @@ export function createReadingSessionManager(dependencies: Dependencies) {
       }
     } catch (error) { release(); throw error; }
     let closed = false;
-    let queue = Promise.resolve();
+    type WaitingSave = { record: SavedReadingSession; listeners: { resolve: () => void; reject: (error: unknown) => void }[] };
+    let pending: WaitingSave | undefined;
+    let writing = false;
+    let released = false;
+    function releaseIfDrained() {
+      if (closed && !writing && !pending && !released) { released = true; release!(); }
+    }
+    async function drain() {
+      if (writing) return;
+      writing = true;
+      while (pending) {
+        const current = pending; pending = undefined;
+        try {
+          await store.put(current.record);
+          snapshot = current.record.snapshot; session.snapshot = snapshot;
+          for (const listener of current.listeners) listener.resolve();
+        } catch (error) {
+          // Reject all requests represented by this write, then continue with the newest pending state.
+          for (const listener of current.listeners) listener.reject(error);
+        }
+      }
+      writing = false; releaseIfDrained();
+    }
     const session: ReadingSession = {
       id,
       snapshot,
@@ -146,15 +168,16 @@ export function createReadingSessionManager(dependencies: Dependencies) {
         const now = dependencies.now();
         if (activity) activeAt = Math.max(activeAt, now);
         const record = { id, updatedAt: now, activeAt, snapshot: next };
-        const write = queue.then(() => store.put(record)).then(() => { snapshot = next; session.snapshot = next; });
-        // A failed transaction must not poison all later retry attempts.
-        queue = write.catch(() => undefined);
-        return write;
+        return new Promise<void>((resolve, reject) => {
+          if (pending) { pending.record = record; pending.listeners.push({ resolve, reject }); }
+          else pending = { record, listeners: [{ resolve, reject }] };
+          void drain();
+        });
       },
       close() {
         if (closed) return;
         closed = true;
-        void queue.then(release!);
+        releaseIfDrained();
       },
     };
     return session;
