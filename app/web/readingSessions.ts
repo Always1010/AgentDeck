@@ -7,7 +7,7 @@ export type ReadingSnapshot = {
   positions: Record<string, { x: number; y: number }>;
   expanded: Record<string, string[]>;
 };
-export type ReadingSessionSummary = { id: string; updatedAt: number; activeAt: number; paneCount: number; titles: string[] };
+export type ReadingSessionSummary = { id: string; updatedAt: number; activeAt: number; paneCount: number; titles: string[]; name?: string; pinned: boolean; collection: boolean; inUse: boolean };
 export type ReadingSession = {
   id: string;
   snapshot: ReadingSnapshot | null;
@@ -17,11 +17,15 @@ export type ReadingSession = {
   close(): void;
 };
 
-type SavedReadingSession = { id: string; updatedAt: number; activeAt: number; snapshot: ReadingSnapshot };
+export type SavedReadingSession = { id: string; updatedAt: number; activeAt: number; snapshot: ReadingSnapshot; name?: string; pinned?: boolean; collection?: boolean };
+export type ReadingSessionMetadata = { name?: string; pinned?: boolean };
 export type ReadingSessionStore = {
   get(id: string): Promise<unknown | null>;
   list(): Promise<unknown[]>;
+  /** Save content, retaining existing metadata when the supplied record omits it. */
   put(record: SavedReadingSession): Promise<void>;
+  patch?(id: string, metadata: ReadingSessionMetadata): Promise<void>;
+  remove?(id: string): Promise<void>;
 };
 type Dependencies = {
   store: ReadingSessionStore;
@@ -83,16 +87,19 @@ export function validateReadingSnapshot(value: unknown): value is ReadingSnapsho
     && Object.values(value.expanded).every(strings);
 }
 
-function isSaved(value: unknown): value is SavedReadingSession {
-  return object(value) && typeof value.id === 'string' && !!value.id && finite(value.updatedAt) && finite(value.activeAt) && validateReadingSnapshot(value.snapshot);
+export function isSavedReadingSession(value: unknown): value is SavedReadingSession {
+  return object(value) && typeof value.id === 'string' && !!value.id && finite(value.updatedAt) && finite(value.activeAt)
+    && (value.name === undefined || typeof value.name === 'string' && value.name.length <= 120)
+    && (value.pinned === undefined || typeof value.pinned === 'boolean')
+    && (value.collection === undefined || typeof value.collection === 'boolean') && validateReadingSnapshot(value.snapshot);
 }
 function mostRecent(a: SavedReadingSession, b: SavedReadingSession) {
   // A background save must not break a recency tie and become the default scene.
   return b.activeAt - a.activeAt || a.id.localeCompare(b.id);
 }
-function summary(record: SavedReadingSession): ReadingSessionSummary {
+function summary(record: SavedReadingSession, inUse: boolean): ReadingSessionSummary {
   const panes = Object.values(record.snapshot.workspace.panes);
-  return { id: record.id, updatedAt: record.updatedAt, activeAt: record.activeAt, paneCount: panes.length,
+  return { id: record.id, updatedAt: record.updatedAt, activeAt: record.activeAt, paneCount: panes.length, name: record.name, pinned: !!record.pinned, collection: !!record.collection, inUse,
     titles: [...new Set(panes.flatMap(pane => pane.items.map(page => page.title || page.id)))].slice(0, 8) };
 }
 
@@ -101,17 +108,48 @@ export function createReadingSessionManager(dependencies: Dependencies) {
   const { store } = dependencies;
   async function read(id: string): Promise<SavedReadingSession | null> {
     const record = await store.get(id);
-    if (record !== null && (!isSaved(record) || record.id !== id)) throw new Error('保存的阅读现场无法读取，原记录已保留。');
+    if (record !== null && (!isSavedReadingSession(record) || record.id !== id)) throw new Error('保存的阅读现场无法读取，原记录已保留。');
     return record;
   }
   async function listReadingSessions(): Promise<ReadingSessionSummary[]> {
-    return (await store.list()).filter(isSaved).sort(mostRecent).map(summary);
+    const records = (await store.list()).filter(isSavedReadingSession).sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || mostRecent(a, b));
+    return Promise.all(records.map(async record => {
+      const release = dependencies.supportsOwnership ? await dependencies.claim(record.id) : null;
+      const inUse = !release;
+      release?.();
+      return summary(record, inUse);
+    }));
+  }
+  async function updateReadingSession(id: string, metadata: ReadingSessionMetadata) {
+    if ((metadata.name !== undefined && (typeof metadata.name !== 'string' || metadata.name.trim().length > 120)) || (metadata.pinned !== undefined && typeof metadata.pinned !== 'boolean')) throw new Error('阅读现场名称或固定设置无效。');
+    if (!store.patch) throw new Error('当前存储不支持修改阅读现场。');
+    if (!await read(id)) throw new Error('阅读现场已不存在，请刷新列表。');
+    await store.patch(id, { ...(metadata.name !== undefined ? { name: metadata.name.trim() } : {}), ...(metadata.pinned !== undefined ? { pinned: metadata.pinned } : {}) });
+  }
+  async function deleteReadingSession(id: string) {
+    if (!dependencies.supportsOwnership) throw new Error('浏览器不支持现场占用检查，暂不能删除阅读现场。');
+    const release = await dependencies.claim(id);
+    if (!release) throw new Error('该阅读现场正在使用，请先关闭对应浏览器标签页。');
+    try {
+      if (!store.remove) throw new Error('当前存储不支持删除阅读现场。');
+      await store.remove(id);
+    } finally { release(); }
+  }
+  async function saveReadingCollection(sourceId: string, name: string) {
+    name = name.trim();
+    if (!name || name.length > 120) throw new Error('请填写不超过 120 字的组合名称。');
+    const source = await read(sourceId);
+    if (!source) throw new Error('当前阅读现场尚未保存，请稍后重试。');
+    const id = dependencies.newId();
+    if (await store.get(id)) throw new Error('组合标识已存在，请重试。');
+    await store.put({ id, updatedAt: dependencies.now(), activeAt: 0, snapshot: structuredClone(source.snapshot), name, pinned: true, collection: true });
+    return id;
   }
   async function openReadingSession(requestedId?: string): Promise<ReadingSession> {
     let source: SavedReadingSession | null = null;
     if (requestedId) source = await read(requestedId);
-    else source = (await store.list()).filter(isSaved).sort(mostRecent)[0] || null;
-    let id = requestedId || source?.id || dependencies.newId();
+    else source = (await store.list()).filter(isSavedReadingSession).filter(record => !record.collection).sort(mostRecent)[0] || null;
+    let id = source?.collection ? dependencies.newId() : requestedId || source?.id || dependencies.newId();
     let release: (() => void) | null = null;
     if (dependencies.supportsOwnership) release = await dependencies.claim(id);
     if (!release) {
@@ -182,7 +220,7 @@ export function createReadingSessionManager(dependencies: Dependencies) {
     };
     return session;
   }
-  return { openReadingSession, listReadingSessions };
+  return { openReadingSession, listReadingSessions, updateReadingSession, deleteReadingSession, saveReadingCollection };
 }
 
 const DATABASE = 'agentdeck-reading-sessions';
@@ -220,8 +258,25 @@ async function transaction<T>(mode: IDBTransactionMode, run: (store: IDBObjectSt
 const browserStore: ReadingSessionStore = {
   get: async id => (await transaction('readonly', store => store.get(id))) ?? null,
   list: () => transaction('readonly', store => store.getAll()),
-  put: async record => { await transaction('readwrite', store => store.put(record)); },
+  put: record => mutateRecord(record.id, previous => ({ ...(isSavedReadingSession(previous) ? previous : {}), ...record })),
+  patch: (id, metadata) => mutateRecord(id, previous => {
+    if (!isSavedReadingSession(previous)) throw new Error('阅读现场已不存在或无法读取。');
+    return { ...previous, ...metadata };
+  }),
+  remove: async id => { await transaction('readwrite', store => store.delete(id)); },
 };
+async function mutateRecord(id: string, change: (previous: unknown) => SavedReadingSession) {
+  const db = await database();
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    const store = tx.objectStore(STORE);
+    const request = store.get(id);
+    let failure: unknown;
+    request.onsuccess = () => { try { store.put(change(request.result)); } catch (error) { failure = error; tx.abort(); } };
+    tx.oncomplete = () => resolve();
+    tx.onabort = tx.onerror = () => reject(failure || tx.error || new Error('阅读现场保存失败，原记录已保留。'));
+  });
+}
 function claimBrowserSession(id: string): Promise<(() => void) | null> {
   return new Promise((resolve, reject) => {
     // The callback stays pending while the document owns this scene. The browser releases it on destruction.
@@ -245,3 +300,6 @@ function manager() {
 }
 export const openReadingSession = (requestedId?: string) => manager().openReadingSession(requestedId);
 export const listReadingSessions = () => manager().listReadingSessions();
+export const updateReadingSession = (id: string, metadata: ReadingSessionMetadata) => manager().updateReadingSession(id, metadata);
+export const deleteReadingSession = (id: string) => manager().deleteReadingSession(id);
+export const saveReadingCollection = (sourceId: string, name: string) => manager().saveReadingCollection(sourceId, name);
