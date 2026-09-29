@@ -99,3 +99,28 @@ test('1000-file smoke: idle and a single modification do not enumerate directori
   await expect.poll(()=>app.updates.snapshot().total,{timeout:10000}).toBe(101);const batchMs=Math.round(performance.now()-batch);expect(listing).not.toHaveBeenCalled();
   console.log(JSON.stringify({measurement:'file-updates-1000-files',baselineMs,singleMs,batch100Ms:batchMs,idleDirectoryReads:0,singleAndBatchDirectoryReads:0}));
 },25000);
+test.runIf(process.platform==='win32')('Windows deleted and recreated watched directories settle instead of spinning a CPU core',async()=>{
+  await app.updates.configure(filter);
+  const directory=path.join(root,'recreated');
+  for(let attempt=0;attempt<3;attempt++){
+    await fs.mkdir(directory);await fs.writeFile(path.join(directory,'before.md'),'before deletion');
+    await app.updates.reconcile();
+    await fs.rm(directory,{recursive:true,force:true});
+    await fs.mkdir(directory);await fs.writeFile(path.join(directory,'after.md'),`replacement ${attempt}`);
+    await app.updates.reconcile();
+    expect(app.updates.snapshot().items.some(item=>item.relativePath==='recreated/after.md')).toBe(true);
+    await fs.rm(directory,{recursive:true,force:true});await app.updates.reconcile();
+  }
+  // Let the native notifications and the 650 ms batch drain before measuring.
+  await new Promise(resolve=>setTimeout(resolve,1500));
+  await expect.poll(()=>app.updates.snapshot().busy).toBe(false);
+  const started=performance.now(),cpu=process.cpuUsage();
+  await new Promise(resolve=>setTimeout(resolve,1200));
+  const usage=process.cpuUsage(cpu),elapsed=performance.now()-started;
+  const corePercent=(usage.user+usage.system)/1000/elapsed*100;
+  console.log(JSON.stringify({measurement:'windows-watch-delete-idle',elapsedMs:Math.round(elapsed),oneCorePercent:Math.round(corePercent*100)/100}));
+  // A generous budget distinguishes sustained native busy looping from test noise.
+  expect(corePercent).toBeLessThan(25);
+  await fs.writeFile(path.join(root,'still-watched.md'),'native notifications still work');
+  await expect.poll(()=>app.updates.snapshot().items.some(item=>item.relativePath==='still-watched.md'),{timeout:7000}).toBe(true);
+});
