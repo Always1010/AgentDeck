@@ -71,3 +71,20 @@ test('aborted requests release their search and directory handles', async () => 
   } finally { await searches.close(); }
 });
 
+test('batch status keeps input order, deduplicates work and reports per-file failures without reading bodies', async () => {
+  const valid = fileReference(id, 'Alpha.html');
+  const missing = fileReference(id, 'missing.html');
+  const excluded = fileReference(id, 'excluded/Alpha.txt');
+  const read = vi.spyOn(fs, 'readFile');
+  const resolve = vi.spyOn(app.policy, 'resolve');
+  const response = await app.main.inject({ method: 'POST', url: '/api/entries/status', headers, payload: { ids: [valid, missing, valid, excluded] } });
+  expect(response.statusCode).toBe(200);
+  expect(response.json().items).toMatchObject([
+    { id: valid, status: 'ready', fileVersion: expect.any(String) },
+    { id: missing, status: 'error', error: { code: 'ENTRY_MISSING' } },
+    { id: valid, status: 'ready' },
+    { id: excluded, status: 'error', error: { code: 'FORBIDDEN_FILE' } },
+  ]);
+  expect(resolve).toHaveBeenCalledTimes(3); expect(read).not.toHaveBeenCalled();
+  expect((await app.main.inject({ method: 'POST', url: '/api/entries/status', headers, payload: { ids: Array(201).fill(valid) } })).statusCode).toBe(400);
+});
