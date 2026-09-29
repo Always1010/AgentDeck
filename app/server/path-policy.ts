@@ -41,6 +41,27 @@ export class PathPolicy {
     if (hidden(rel, mount.excludes, internalPackage)) throw new AppError('FORBIDDEN_FILE', '该文件在排除范围内', 403);
     let root: string;
     try { root = await this.root(mount.absolutePath); } catch (e) { if (e instanceof AppError) throw e; throw new AppError('MOUNT_OFFLINE', '目录离线或不可访问', 503); }
+    return this.resolveAtRoot(mount, rel, root, internalPackage, access);
+  }
+  /** Reuse root validation within one listing; every child still checks its complete path. */
+  async directory(mount: Mount, rel: string) {
+    if (!mount.enabled) throw new AppError('MOUNT_DISABLED', '挂载已停用', 410);
+    relative(rel);
+    if (hidden(rel, mount.excludes)) throw new AppError('FORBIDDEN_FILE', '该文件在排除范围内', 403);
+    let root: string;
+    try { root = await this.root(mount.absolutePath); } catch (e) { if (e instanceof AppError) throw e; throw new AppError('MOUNT_OFFLINE', '目录离线或不可访问', 503); }
+    const directory = await this.resolveAtRoot(mount, rel, root, false, 'file');
+    if (!directory.stat.isDirectory()) throw new AppError('INVALID_PATH', '请选择目录', 400);
+    return { ...directory, resolveChild: async (name: string) => {
+      relative(name, false);
+      if (name.includes('/')) throw new AppError('INVALID_PATH', '需要直接子项名称');
+      return this.resolveAtRoot(mount, [rel, name].filter(Boolean).join('/'), root, false, 'file');
+    } };
+  }
+  private async resolveAtRoot(mount: Mount, rel: string, root: string, internalPackage: boolean, access: 'preview' | 'file') {
+    if (!mount.enabled) throw new AppError('MOUNT_DISABLED', '挂载已停用', 410);
+    relative(rel);
+    if (hidden(rel, mount.excludes, internalPackage)) throw new AppError('FORBIDDEN_FILE', '该文件在排除范围内', 403);
     const target = path.resolve(root, rel);
     if (!inside(root, target) || inside(this.stateDir, target)) throw new AppError('FORBIDDEN_PATH', '文件超出可访问范围', 403);
     await this.noLinks(target);

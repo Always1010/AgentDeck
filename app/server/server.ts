@@ -9,6 +9,7 @@ import { Registry } from './registry.js';
 import { FileUpdates, filterSchema } from './updates.js';
 import { FileSearch } from './file-search.js';
 import { resourceVersion } from './resource-version.js';
+import { mapLimited } from './concurrency.js';
 import type { FileStatusResult } from '../shared/fileOperations.js';
 import { fileVersion } from '../shared/updates.js';
 import { PathPolicy, inside, relative, mime } from './path-policy.js';
@@ -189,8 +190,18 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     return changed(d=>{d.toolOverrides=d.toolOverrides.filter(o=>!(o.mountId===value.mountId&&o.toolRoot===value.toolRoot));d.toolOverrides.push(value);return {ok:true};});
   });
   main.get<{Params:{id:string};Querystring:{path?:string}}>('/api/mounts/:id/tree',async req=>{
-    const m=mount(req.params.id);const root=req.query.path||'';const dir=await policy.resolve(m,root,false,'file');if(!dir.stat.isDirectory())throw new AppError('INVALID_PATH','请选择目录',400);const result:TreeItem[]=[];
-    for(const d of await fs.readdir(dir.real,{withFileTypes:true})){ const rel=[root,d.name].filter(Boolean).join('/'); try{const item=await policy.resolve(m,rel,false,'file');const oldIds=item.stat.isDirectory()?[]:legacyIds(m,rel,registry.data);for(const id of oldIds)aliases.set(id,{mountId:m.id,relativePath:rel});result.push({name:d.name,relativePath:rel,directory:item.stat.isDirectory(),...(!item.stat.isDirectory()?{legacyIds:oldIds}:{})});}catch{/* identical boundary for tree and serving */} }
+    const m=mount(req.params.id);const root=req.query.path||'';const dir=await policy.directory(m,root);
+    const children = await mapLimited(await fs.readdir(dir.real,{withFileTypes:true}), 8, async d => {
+      if(d.isSymbolicLink())return undefined;
+      const rel=[root,d.name].filter(Boolean).join('/');
+      try {
+        const item=await dir.resolveChild(d.name);
+        const oldIds=item.stat.isDirectory()?[]:legacyIds(m,rel,registry.data);
+        for(const id of oldIds)aliases.set(id,{mountId:m.id,relativePath:rel});
+        return {name:d.name,relativePath:rel,directory:item.stat.isDirectory(),...(!item.stat.isDirectory()?{legacyIds:oldIds}:{})} as TreeItem;
+      }catch{return undefined;/* identical boundary for tree and serving */}
+    });
+    const result = children.filter((item): item is TreeItem => !!item);
     const rank=(name:string)=>/\.(html?|csv|md|markdown)$/i.test(name)?0:1;
     return result.sort((a,b)=>Number(b.directory)-Number(a.directory)||(!a.directory&&!b.directory?rank(a.name)-rank(b.name):0)||a.name.localeCompare(b.name,'zh-CN',{numeric:true}));
   });
