@@ -1,0 +1,11 @@
+.quick-open-dialog{width:min(720px,100%)}
+.quick-open-dialog form{display:grid;gap:10px}
+.quick-open-dialog label{display:grid;gap:5px}
+.quick-open-dialog input,.quick-open-dialog select{width:100%;min-width:0}
+.quick-open-results,.closed-pages-list{list-style:none;padding:0;display:grid;gap:6px;max-height:45vh;overflow:auto}
+.quick-open-results li{display:flex;gap:6px;align-items:center}
+.quick-open-file{flex:1;min-width:0;text-align:left;display:flex;gap:6px;flex-wrap:wrap}
+.quick-open-file strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.quick-open-file span{font-size:11px;color:var(--muted)}
+.quick-open-file small{width:100%;overflow-wrap:anywhere;color:var(--muted)}
+.closed-pages-list button{max-width:100%;text-align:left;overflow-wrap:anywhere}
