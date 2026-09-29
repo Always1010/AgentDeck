@@ -36,6 +36,13 @@ export function QuickOpen({ snapshot, pages, favorites, tools, open, reveal, clo
     if (clear) setItems([]);
   }
   useEffect(() => () => { generation.current++; controller.current?.abort(); release(cursor.current); }, []);
+  const selectedMount = snapshot.mounts.find(mount => mount.id === scope);
+  const scopeSignature = JSON.stringify(selectedMount && [selectedMount.absolutePath, selectedMount.enabled, selectedMount.excludes]);
+  useEffect(() => {
+    if (scope === 'known') return;
+    stop(true);
+    if (!selectedMount?.enabled) setScope('known');
+  }, [scope, scopeSignature]);
   const known = useMemo(() => {
     const candidates = new Map<string, { id: string; title: string; categories: string[] }>();
     function add(id: string, title: string, category: string) {
