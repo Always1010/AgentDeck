@@ -158,6 +158,47 @@ test('quota failure preserves the last committed scene and a subsequent retry ca
   expect(session.snapshot?.workspace.panes[0].active).toBe('retry');
 });
 
+test('a slow write keeps only the newest pending snapshot and preserves foreground recency', async () => {
+  const env = environment();
+  const session = await env.openReadingSession();
+  const persist = env.store.put;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const writes: string[] = [];
+  env.store.put = async record => {
+    writes.push(record.snapshot.workspace.panes[0].active);
+    if (writes.length === 1) await gate;
+    await persist(record);
+  };
+  const first = session.save(snapshot('first'));
+  const second = session.save(snapshot('second'), true);
+  const third = session.save(snapshot('latest'));
+  session.close();
+  release();
+  await Promise.all([first, second, third]);
+  expect(writes).toEqual(['first', 'latest']);
+  expect(session.snapshot?.workspace.panes[0].active).toBe('latest');
+  expect((await env.store.get(session.id) as any).activeAt).toBeGreaterThan(0);
+  expect(env.owners.has(session.id)).toBe(false);
+});
+
+test('a failed in-flight save does not discard the newer pending save', async () => {
+  const env = environment();
+  const session = await env.openReadingSession();
+  const persist = env.store.put;
+  let rejectFirst!: (reason: Error) => void;
+  const gate = new Promise<void>((_, reject) => { rejectFirst = reject; });
+  let count = 0;
+  env.store.put = async record => { if (++count === 1) await gate; await persist(record); };
+  const failed = session.save(snapshot('failed'));
+  const checkedFailure = expect(failed).rejects.toThrow('quota');
+  const latest = session.save(snapshot('latest'));
+  rejectFirst(new Error('quota'));
+  await checkedFailure;
+  await latest;
+  expect(session.snapshot?.workspace.panes[0].active).toBe('latest');
+});
+
 test('corrupt saved scenes are retained, excluded from recent scenes, and explicit restore reports the error', async () => {
   const env = environment();
   env.records.set('broken', { id: 'broken', activeAt: 100, updatedAt: 100, snapshot: { version: 1 } });

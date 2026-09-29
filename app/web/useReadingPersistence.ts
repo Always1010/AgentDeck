@@ -1,41 +1,54 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReadingSession, ReadingSnapshot } from './readingSessions.js';
+import { createPersistenceScheduler } from './persistenceScheduler.js';
 
 /** Structural changes save immediately; idle activity only updates foreground recency. */
-export function useReadingPersistence(session: ReadingSession | null, snapshot: ReadingSnapshot) {
-  const latest = useRef(snapshot); latest.current = snapshot;
+export function useReadingPersistence(session: ReadingSession | null, snapshot: ReadingSnapshot, options: { capture?: () => ReadingSnapshot } = {}) {
+  const latest = useRef({ snapshot, capture: options.capture }); latest.current = { snapshot, capture: options.capture };
   const activity = useRef(document.visibilityState === 'visible');
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [saveError, setSaveError] = useState('');
-  const save = useRef(() => {});
-  save.current = () => {
-    clearTimeout(timer.current);
+  const save = useRef(async () => {});
+  save.current = async () => {
     if (!session) return;
     const foreground = activity.current; activity.current = false;
-    void session.save(latest.current, foreground).then(() => setSaveError('')).catch(error => setSaveError(`当前更改未能保存：${(error as Error).message}`));
+    try {
+      await session.save(latest.current.capture?.() || latest.current.snapshot, foreground);
+      setSaveError('');
+    } catch (error) {
+      activity.current ||= foreground;
+      setSaveError(`当前更改未能保存：${(error as Error).message}`);
+      throw error;
+    }
   };
+  const scheduler = useRef<ReturnType<typeof createPersistenceScheduler> | null>(null);
+  scheduler.current ||= createPersistenceScheduler(() => save.current());
   function markActivity() {
     if (document.visibilityState !== 'visible') return;
     activity.current = true;
-    clearTimeout(timer.current); timer.current = setTimeout(() => save.current(), 250);
+    scheduler.current!.schedule();
   }
-  useEffect(() => { save.current(); }, [session, snapshot]);
+  function schedulePositionSave() {
+    if (document.visibilityState === 'visible') activity.current = true;
+    scheduler.current!.schedule();
+  }
+  useEffect(() => { void scheduler.current!.flush().catch(() => undefined); }, [session, snapshot]);
   useEffect(() => {
     const mark = () => markActivity();
-    const visibility = () => { if (document.visibilityState === 'hidden') save.current(); };
-    const hide = () => save.current();
+    const hide = () => { void scheduler.current!.flush().catch(() => undefined); };
+    const visibility = () => { if (document.visibilityState === 'hidden') hide(); };
     // Ownership remains with this document, including BFCache; destruction releases Web Locks.
     document.addEventListener('pointerdown', mark, true);
     document.addEventListener('keydown', mark, true);
     document.addEventListener('visibilitychange', visibility);
     window.addEventListener('pagehide', hide);
     return () => {
-      clearTimeout(timer.current);
+      scheduler.current!.cancel();
       document.removeEventListener('pointerdown', mark, true);
       document.removeEventListener('keydown', mark, true);
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('pagehide', hide);
     };
   }, [session]);
-  return { saveError, retrySave: () => save.current(), markActivity };
+  return { saveError, retrySave: () => { void scheduler.current!.flush().catch(() => undefined); }, markActivity,
+    flush: () => scheduler.current!.flush(), schedulePositionSave };
 }
