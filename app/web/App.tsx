@@ -115,16 +115,15 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   const [navigationEnabled,setNavigationEnabled]=usePreference('shortcuts.navigation',true,isBoolean);
   const [documentFontSize,setDocumentFontSize]=usePreference('reading.font-size',14,(value):value is number=>typeof value==='number'&&Number.isInteger(value)&&value>=12&&value<=24);
   const positions=useRef(new Map<string,{x:number;y:number}>(Object.entries(session?.snapshot?.positions||{})));
-  const [positionVersion,updatePositions]=useReducer((v:number)=>v+1,0);
-  const positionTimer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
   const [expanded,setExpanded]=useState<Record<string,string[]>>(session?.snapshot?.expanded||{});
   function positionChanged(key:string,position:{x:number;y:number}){
     positions.current.set(key,{x:Math.max(0,position.x),y:Math.max(0,position.y)});
-    if(!positionTimer.current)positionTimer.current=setTimeout(()=>{positionTimer.current=undefined;updatePositions();},200);
+    schedulePositionSave();
   }
-  useEffect(()=>()=>clearTimeout(positionTimer.current),[]);
-  const savedScene=useMemo<ReadingSnapshot>(()=>({version:1,workspace,view:{immersive,collapsed,width,openedExpanded,view,query},positions:Object.fromEntries(positions.current),expanded}),[workspace,immersive,collapsed,width,openedExpanded,view,query,positionVersion,expanded]);
-  const {saveError,retrySave,markActivity}=useReadingPersistence(session,savedScene);
+  const savedScene=useMemo<ReadingSnapshot>(()=>({version:1,workspace,view:{immersive,collapsed,width,openedExpanded,view,query},positions:Object.fromEntries(positions.current),expanded}),[workspace,immersive,collapsed,width,openedExpanded,view,query,expanded]);
+  const {saveError,retrySave,markActivity,schedulePositionSave,flush}=useReadingPersistence(session,savedScene,{
+    capture: () => ({ ...savedScene, positions: Object.fromEntries(positions.current) }),
+  });
   const [htmlOpening,setHtmlOpening]=usePreference<HtmlOpening>('html.opening','workbench',isHtmlOpening);
   const [previewOrigin,setPreviewOrigin]=useState('');
   const [settingsPage,setSettingsPage]=useState(location.hash==='#settings');

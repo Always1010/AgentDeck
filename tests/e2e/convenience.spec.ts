@@ -47,3 +47,33 @@ test('reopens a closed document with its position and keeps another tool alive',
   await page.getByRole('tab', { name: 'tool.html', exact: true }).click();
   await expect(page.frameLocator('iframe').locator('#draft')).toHaveValue('保留的输入');
 });
+
+test('continuous scrolling coalesces storage writes and visibility flush captures the latest position', async ({ page }) => {
+  await page.getByRole('treeitem', { name: 'reading.md', exact: true }).click();
+  const reader = page.getByRole('tabpanel').locator('.reader');
+  await expect(reader).toBeVisible();
+  await page.waitForTimeout(400);
+  await page.evaluate(() => {
+    const counters = window as typeof window & { sceneWrites: number };
+    counters.sceneWrites = 0;
+    const original = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args: Parameters<typeof original>) {
+      if (this.transaction.db.name === 'agentdeck-reading-sessions') counters.sceneWrites++;
+      return original.apply(this, args);
+    };
+  });
+  await reader.evaluate(async element => {
+    for (let step = 1; step <= 60; step++) {
+      element.scrollTop = step * 10;
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    }
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForTimeout(150);
+  const writes = await page.evaluate(() => (window as typeof window & { sceneWrites: number }).sceneWrites);
+  console.log(JSON.stringify({ measurement: 'reading-scroll-writes', animationFrames: 60, writes }));
+  expect(writes).toBeLessThanOrEqual(3);
+  await page.reload();
+  await expect.poll(() => reader.evaluate(element => element.scrollTop)).toBeGreaterThanOrEqual(590);
+});
