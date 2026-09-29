@@ -54,7 +54,7 @@ export class FileSearch {
     if (!search) {
       const directory = await this.policy.resolve(mount, scope, false, 'file');
       if (!directory.stat.isDirectory()) throw new AppError('INVALID_PATH', '请选择搜索目录', 400);
-      if (this.searches.size >= 20) {
+      while (this.searches.size >= 20) {
         const oldest = [...this.searches.values()].filter(item => !item.busy).sort((a, b) => a.expires - b.expires)[0];
         if (oldest) await this.dispose(oldest);
         else throw new AppError('SEARCH_BUSY', '正在执行的搜索过多，请稍后重试', 429);
