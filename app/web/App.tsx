@@ -23,6 +23,7 @@ import type { BridgeAction } from '../shared/bridge.js';
 import { FileOpenMenu } from './FileOpenMenu.js';
 import { FileTypeFilterControl } from './FileTypeFilter.js';
 import { useFileUpdates } from './useFileUpdates.js';
+import { useEntryAvailability } from './useEntryAvailability.js';
 import { UnreadFiles } from './UnreadFiles.js';
 import type { FileUpdate } from '../shared/updates.js';
 import { openReadingSession, type ReadingSession, type ReadingSnapshot } from './readingSessions.js';
@@ -157,15 +158,11 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
     }).catch(()=>{/* Existing local aliases and lazy directory migration remain available. */});
     return()=>{cancelled=true;};
   },[]);
-  const [favoriteErrors,setFavoriteErrors]=useState<Record<string,string>>({});
-  useEffect(()=>{if(view==='files')return;let cancelled=false;let checking=false;
-    async function check(){if(checking||document.visibilityState!=='visible')return;checking=true;const next:Record<string,string>={};
-      const ids=(view==='tools'?tools.map(t=>t.id):favorites).filter(id=>parseFileReference(id));
-      for(let i=0;i<ids.length&&!cancelled;i+=6)await Promise.all(ids.slice(i,i+6).map(async id=>{try{await api(`/api/entries/${encodeURIComponent(id)}`);}catch(e){next[id]=(e as Error).message;}}));
-      if(!cancelled)setFavoriteErrors(next);checking=false;
-    }
-    void check();const timer=setInterval(()=>void check(),4000);return()=>{cancelled=true;clearInterval(timer);};
-  },[view,favorites,tools,data.revision,refresh]);
+  const favoriteErrors = useEntryAvailability(
+    view === 'tools' ? tools.map(tool => tool.id) : favorites,
+    view !== 'files' && (searchActive || (!immersive && !collapsed)),
+    `${data.revision}:${refresh}`,
+  );
   function discovered(mount:Mount,items:TreeItem[]){
     const next={...aliasesRef.current};let changed=false;
     for(const item of items)for(const old of item.legacyIds||[]){const id=fileReference(mount.id,item.relativePath);if(next[old]!==id){next[old]=id;changed=true;}}

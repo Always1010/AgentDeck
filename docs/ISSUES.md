@@ -273,3 +273,13 @@
 - 验证方式：`node node_modules/typescript/bin/tsc --noEmit` 通过；定向 Vitest 2 项通过，覆盖替代读取取消、过期结果守卫与 API 信号透传。新增浏览器回归覆盖“源码读取中刷新”，待统一构建后执行。
 - 相关文件：app/web/api.ts、app/web/Viewer.tsx、app/web/viewers/requests.ts、tests/viewers-requests.test.ts、tests/e2e/viewers.spec.ts。
 
+
+## AD-028 — 收藏和工具列表隐藏后仍检查文件状态
+
+- 日期：2026-09-30
+- 状态：已解决
+- 现象：收藏或工具视图下收起侧栏、进入沉浸或关闭移动抽屉后，列表仍每 4 秒检查文件可用性。
+- 原因：检查仅受浏览器页面可见性控制，没有使用侧栏实际可见性；逐个条目发请求还增加了重复通信。
+- 解决方案：抽出 useEntryAvailability，以列表实际可见性控制定时器；隐藏时取消请求，显示时立即核对。文件 ID 去重并每批最多 200 项查询，未变化结果保留引用。
+- 验证方式：类型检查及构建通过；polling.spec.ts 新增浏览器回归通过，验证收起后超过一个周期无批量请求、隐藏时删除文件并在展开后立即显示不可用。
+- 相关文件：app/web/App.tsx、app/web/useEntryAvailability.ts、tests/e2e/polling.spec.ts。

@@ -124,3 +124,19 @@ test('document visibility pauses directory polling and refreshes immediately on 
   await expect(page.getByRole('treeitem', { name: 'folder', exact: true })).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByRole('treeitem', { name: 'after-visible.md', exact: true })).toBeVisible();
 });
+
+test('hidden favorites stop batch checks and refresh availability when shown again', async ({ page }) => {
+  await page.getByRole('button', { name: '收藏：report.html', exact: true }).click();
+  await page.getByRole('button', { name: '收藏', exact: true }).click();
+  const requests: string[] = [];
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/entries/status') requests.push(request.url()); });
+  await expect.poll(() => requests.length, { timeout: 6000 }).toBeGreaterThan(0);
+  await page.getByRole('button', { name: '收起文件侧栏', exact: true }).click();
+  const count = requests.length;
+  await page.waitForTimeout(4300);
+  expect(requests).toHaveLength(count);
+  await fs.unlink(path.join(root, 'report.html'));
+  await page.getByRole('button', { name: '展开文件侧栏', exact: true }).click();
+  await expect(page.getByRole('treeitem', { name: /report.html/ })).toContainText('不可用', { timeout: 2000 });
+  expect(requests.length).toBeGreaterThan(count);
+});
