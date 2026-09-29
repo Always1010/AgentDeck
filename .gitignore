@@ -8,4 +8,7 @@ dist/
 test-fixtures-*/
 test-results/
 playwright-report/
+docs/test-results*.json
+docs/test-results/
+docs/playwright-report/
 *.log
