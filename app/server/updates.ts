@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { watch, type FSWatcher } from 'node:fs';
+import { watch, type FSWatcher, type Stats } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { defaultFileTypeFilter, fileTypeVisible, isFileTypeFilter, type FileTypeFilter } from '../shared/file-types.js';
@@ -13,6 +13,10 @@ const stateSchema = z.object({ schemaVersion:z.literal(1), filter:filterSchema, 
 type State = z.infer<typeof stateSchema>;
 const under = (name:string, root:string) => !root || name===root || name.startsWith(`${root}/`);
 const missing = (e:unknown) => ['ENOENT','ENOTDIR'].includes((e as NodeJS.ErrnoException).code || '');
+const watchEventLimit=1024;
+const watchRetryMs=30_000;
+type DirectoryWatch = {mountId:string;rel:string;identity:string;watcher:FSWatcher};
+type WatchRecovery = {mountId:string;rel:string;message:string;timer:ReturnType<typeof setTimeout>};
 
 /** One shared service. Only directory metadata is indexed; document contents are never read. */
 export class FileUpdates {
@@ -21,7 +25,8 @@ export class FileUpdates {
   private closed=false;
   private corrupt=false;
   private queue:Promise<unknown>=Promise.resolve();
-  private watchers=new Map<string,{mountId:string;rel:string;watcher:FSWatcher}>();
+  private watchers=new Map<string,DirectoryWatch>();
+  private recovering=new Map<string,WatchRecovery>();
   private pending=new Map<string,Set<string>>();
   private debounce?:ReturnType<typeof setTimeout>;
   private interval?:ReturnType<typeof setInterval>;
@@ -41,7 +46,7 @@ export class FileUpdates {
     const items=Object.entries(this.state.records).filter(([,r])=>{
       const m=mounts.get(r.mountId);return m&&this.state.mounts[m.id]?.mount.absolutePath===m.absolutePath&&r.active&&r.version!==r.readVersion&&!hidden(r.relativePath,m.excludes)&&fileTypeVisible(path.posix.basename(r.relativePath),this.state.filter);
     }).map(([id,r])=>({id,mountId:r.mountId,relativePath:r.relativePath,version:r.version,kind:r.kind,changedAt:r.changedAt,sequence:r.sequence})).sort((a,b)=>b.sequence-a.sequence||a.id.localeCompare(b.id));
-    return {initialized:this.initialized,filter:this.state.filter,items:items.slice(0,200),total:items.length,through:this.state.sequence,busy:this.jobs>0,errors:[...this.errors.values()]};
+    return {initialized:this.initialized,filter:this.state.filter,items:items.slice(0,200),total:items.length,through:this.state.sequence,busy:this.jobs>0,errors:[...new Set([...this.errors.values(),...[...this.recovering.values()].map(r=>r.message)])]};
   }
   private enqueue<T>(task:()=>Promise<T>):Promise<T|undefined>{
     if(this.closed)return Promise.resolve(undefined);
@@ -68,21 +73,55 @@ export class FileUpdates {
   }
   scheduleSync(){if(this.initialized&&!this.closed)void this.enqueue(()=>this.sync()).catch(()=>{});}
   async reconcile(){await this.enqueue(()=>this.sync());}
-  private dropWatchers(mountId:string,scope=''){
-    for(const [key,w] of this.watchers)if(w.mountId===mountId&&under(w.rel,scope)){w.watcher.close();this.watchers.delete(key);}
+  private dropWatchers(mountId:string,scope='',cancelRecovery=false){
+    for(const [key,w] of this.watchers)if(w.mountId===mountId&&under(w.rel,scope)){this.watchers.delete(key);w.watcher.close();}
+    if(cancelRecovery)for(const [key,r] of this.recovering)if(r.mountId===mountId&&under(r.rel,scope)){clearTimeout(r.timer);this.recovering.delete(key);}
   }
-  private listen(m:Mount,rel:string,real:string){
-    const key=fileReference(m.id,rel);if(this.watchers.has(key)||this.closed)return;
+  private recoverWatch(m:Mount,rel:string){
+    // Close synchronously: filtering or debouncing callbacks cannot stop a native
+    // Windows watcher that repeatedly reports a deleted directory's absolute path.
+    this.dropWatchers(m.id,rel,true);
+    const key=fileReference(m.id,rel);
+    const timer=setTimeout(()=>{
+      this.recovering.delete(key);
+      const current=this.mounts().find(item=>item.id===m.id&&item.enabled);
+      if(!this.closed&&current?.absolutePath===m.absolutePath&&!hidden(rel,current.excludes))this.changed(m.id,rel);
+      this.emit();
+    },watchRetryMs);
+    timer.unref();
+    this.recovering.set(key,{mountId:m.id,rel,timer,message:`${m.label}：目录监听异常，已暂停该目录的监听；30 秒后重试，期间保留后台核对。`});
+    this.changed(m.id,rel);this.emit();
+  }
+  private listen(m:Mount,rel:string,real:string,stat:Stats){
+    if(this.closed||[...this.recovering.values()].some(r=>r.mountId===m.id&&under(rel,r.rel)))return;
+    const key=fileReference(m.id,rel),identity=`${stat.dev}:${stat.ino}:${stat.birthtimeMs}`;
+    const previous=this.watchers.get(key);
+    if(previous?.identity===identity)return;
+    if(previous)this.dropWatchers(m.id,rel);
     try{
+      let entry:DirectoryWatch;
+      let windowStart=Date.now(),events=0;
       const watcher=watch(real,(_event,name)=>{
+        // Already queued callbacks/errors must not retire a replacement watcher.
+        if(this.closed||this.watchers.get(key)!==entry)return;
+        const current=this.mounts().find(item=>item.id===m.id&&item.enabled);
+        if(!current||current.absolutePath!==m.absolutePath||hidden(rel,current.excludes)){this.dropWatchers(m.id,rel,true);return;}
+        const now=Date.now();if(now-windowStart>=1000){windowStart=now;events=0;}
+        if(++events>watchEventLimit){this.recoverWatch(m,rel);return;}
         const child=name?String(name).split(path.sep).join('/'):'';
         const target=[rel,child].filter(Boolean).join('/');
-        const current=this.mounts().find(item=>item.id===m.id&&item.enabled);
-        try{relative(target);if(!current||hidden(target,current.excludes))return;}catch{return;}
+        try{
+          // Do not resolve event-supplied absolute/invalid names or keep their
+          // watcher alive. Reconcile only the original, authorized scope.
+          relative(child);relative(target);
+          if(!child&&_event==='rename'){this.recoverWatch(m,rel);return;}
+          if(hidden(target,current.excludes))return;
+        }catch{this.recoverWatch(m,rel);return;}
         this.changed(m.id,target);
       });
-      watcher.unref();watcher.on('error',()=>{watcher.close();this.watchers.delete(key);this.errors.set(m.id,`${m.label}：监听中断，将在后台核对时重试。`);this.emit();});
-      this.watchers.set(key,{mountId:m.id,rel,watcher});
+      entry={mountId:m.id,rel,identity,watcher};
+      this.watchers.set(key,entry);
+      watcher.unref();watcher.on('error',()=>{if(!this.closed&&this.watchers.get(key)===entry)this.recoverWatch(m,rel);});
     }catch{this.errors.set(m.id,`${m.label}：实时监听不可用，暂由后台定期核对。`);}
   }
   private changed(mountId:string,rel:string){
@@ -110,14 +149,14 @@ export class FileUpdates {
       kind:unread?old.kind:old?'modified':'added',changedAt:silent?old?.changedAt||0:Date.now(),sequence};
   }
   private async scan(m:Mount,scope:string,baseline:(rel:string)=>boolean):Promise<boolean>{
-    const seen=new Set<string>(),failed:string[]=[];
+    const seen=new Set<string>(),directories=new Set<string>(),failed:string[]=[];
     const visit=async(rel:string):Promise<void>=>{
       if(this.closed)return;
       if(hidden(rel,m.excludes))return;
       try{
         const item=await this.policy.resolve(m,rel,false,'file');
         if(item.stat.isDirectory()){
-          this.listen(m,rel,item.real);
+          directories.add(rel);this.listen(m,rel,item.real,item.stat);
           for(const d of await fs.readdir(item.real,{withFileTypes:true})){
             if(d.isSymbolicLink())continue;
             const child=[rel,d.name].filter(Boolean).join('/');
@@ -135,6 +174,11 @@ export class FileUpdates {
     };
     await visit(scope);
     if(this.closed)return false;
+    // A successful parent enumeration may no longer contain a formerly watched
+    // child, so visiting only existing entries is insufficient to retire it.
+    for(const w of this.watchers.values()){
+      if(w.mountId===m.id&&under(w.rel,scope)&&!directories.has(w.rel)&&!failed.some(p=>under(w.rel,p)))this.dropWatchers(m.id,w.rel);
+    }
     for(const [id,r] of Object.entries(this.state.records)){
       if(r.mountId!==m.id||!under(r.relativePath,scope)||failed.some(p=>under(r.relativePath,p)))continue;
       if(hidden(r.relativePath,m.excludes)||!fileTypeVisible(path.posix.basename(r.relativePath),this.state.filter)){r.active=false;continue;}
@@ -147,18 +191,18 @@ export class FileUpdates {
     this.errors.delete('operation');
     const mounts=this.mounts();
     for(const id of this.errors.keys())if(!['operation','storage'].includes(id)&&!mounts.some(m=>m.id===id))this.errors.delete(id);
-    for(const w of this.watchers.values())if(!mounts.some(m=>m.id===w.mountId))this.dropWatchers(w.mountId);
+    for(const w of [...this.watchers.values(),...this.recovering.values()])if(!mounts.some(m=>m.id===w.mountId))this.dropWatchers(w.mountId,'',true);
     for(const id of Object.keys(this.state.mounts))if(!mounts.some(m=>m.id===id)){
-      this.dropWatchers(id);delete this.state.mounts[id];this.errors.delete(id);
+      this.dropWatchers(id,'',true);delete this.state.mounts[id];this.errors.delete(id);
       for(const [key,r] of Object.entries(this.state.records))if(r.mountId===id)delete this.state.records[key];
     }
     for(const m of mounts){
       if(this.closed)return;
       const previous=this.state.mounts[m.id];
       const moved=previous&&previous.mount.absolutePath!==m.absolutePath;
-      if(moved){this.dropWatchers(m.id);for(const [id,r] of Object.entries(this.state.records))if(r.mountId===m.id)delete this.state.records[id];}
-      if(!m.enabled){this.dropWatchers(m.id);for(const r of Object.values(this.state.records))if(r.mountId===m.id)r.active=false;this.state.mounts[m.id]={mount:structuredClone(m),filter:structuredClone(this.state.filter)};continue;}
-      for(const [,w] of this.watchers)if(w.mountId===m.id&&hidden(w.rel,m.excludes))this.dropWatchers(m.id,w.rel);
+      if(moved){this.dropWatchers(m.id,'',true);for(const [id,r] of Object.entries(this.state.records))if(r.mountId===m.id)delete this.state.records[id];}
+      if(!m.enabled){this.dropWatchers(m.id,'',true);for(const r of Object.values(this.state.records))if(r.mountId===m.id)r.active=false;this.state.mounts[m.id]={mount:structuredClone(m),filter:structuredClone(this.state.filter)};continue;}
+      for(const w of [...this.watchers.values(),...this.recovering.values()])if(w.mountId===m.id&&hidden(w.rel,m.excludes))this.dropWatchers(m.id,w.rel,true);
       this.errors.delete(m.id);
       const baseline=(rel:string)=>!previous||!!moved||!previous.mount.enabled||hidden(rel,previous.mount.excludes)||!fileTypeVisible(path.posix.basename(rel),previous.filter);
       if(await this.scan(m,'',baseline))this.state.mounts[m.id]={mount:structuredClone(m),filter:structuredClone(this.state.filter)};
@@ -185,6 +229,7 @@ export class FileUpdates {
   }
   async close(){
     this.closed=true;clearTimeout(this.debounce);clearInterval(this.interval);
+    for(const r of this.recovering.values())clearTimeout(r.timer);this.recovering.clear();
     for(const w of this.watchers.values())w.watcher.close();this.watchers.clear();
     await this.queue;
   }
