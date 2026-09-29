@@ -12,11 +12,13 @@ export function useEntryAvailability(ids: string[], visible: boolean, revision: 
     const entries = JSON.parse(key) as string[];
     let disposed = false;
     let checking = false;
+    let refreshPending = false;
     let timer: ReturnType<typeof setInterval> | undefined;
     let controller: AbortController | undefined;
     async function check() {
       if (checking || disposed || document.visibilityState !== 'visible') return;
       checking = true;
+      refreshPending = false;
       const request = new AbortController();
       controller = request;
       const next: Record<string, string> = {};
@@ -34,11 +36,13 @@ export function useEntryAvailability(ids: string[], visible: boolean, revision: 
         }
       } finally {
         checking = false;
+        if (refreshPending && !disposed && document.visibilityState === 'visible') void check();
       }
     }
     function visibilityChanged() {
       clearInterval(timer);
-      if (document.visibilityState !== 'visible') { controller?.abort(); return; }
+      if (document.visibilityState !== 'visible') { refreshPending = false; controller?.abort(); return; }
+      refreshPending = true;
       void check();
       timer = setInterval(() => void check(), 4000);
     }

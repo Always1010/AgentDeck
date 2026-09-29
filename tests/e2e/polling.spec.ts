@@ -140,3 +140,26 @@ test('hidden favorites stop batch checks and refresh availability when shown aga
   await expect(page.getByRole('treeitem', { name: /report.html/ })).toContainText('不可用', { timeout: 2000 });
   expect(requests.length).toBeGreaterThan(count);
 });
+
+test('rapid visibility return rechecks favorites immediately after cancelling an in-flight batch', async ({ page }) => {
+  await page.getByRole('button', { name: '收藏：report.html', exact: true }).click();
+  let unblock!: () => void;
+  const blocked = new Promise<void>(resolve => { unblock = resolve; });
+  let requests = 0;
+  await page.route('**/api/entries/status', async route => {
+    requests++;
+    if (requests === 1) { await blocked; await route.abort().catch(() => undefined); }
+    else await route.continue();
+  });
+  await page.getByRole('button', { name: '收藏', exact: true }).click();
+  await expect.poll(() => requests).toBe(1);
+  try {
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect.poll(() => requests, { timeout: 2000 }).toBe(2);
+  } finally { unblock(); }
+});
