@@ -22,7 +22,7 @@
 
 1. **项目与挂载登记**：维护项目、目录挂载、工具入口覆盖和文件显示偏好；不会移动、改写或删除用户挂载的源文件。
 2. **安全的目录访问**：对每次目录、文件、下载和预览请求都验证挂载状态、相对路径、真实路径与排除规则；禁止符号链接/junction、UNC 路径、敏感目录、隐藏文件及密钥等。
-3. **文件浏览与阅读支撑**：按需列出单层目录、读取受支持的文本文件、提供下载，并生成稳定的文件引用与预览地址。
+3. **文件浏览与阅读支撑**：按需列出单层目录、批量检查文件状态、按用户选择的范围搜索文件名和路径、读取受支持的文本文件与提供下载，并生成稳定的文件引用与预览地址。
 4. **HTML 报告/工具预览**：维持相对资源路径；在响应过程中注入桥接脚本，不写回源 HTML。桥接脚本用于 iframe 内的焦点、滚动和工作台快捷键协调。
 5. **工具分类**：将指定 HTML 文件登记为“工具”，也支持单工具挂载、历史登记和每个工具根目录的入口覆盖；工具分类本身不递归扫描挂载目录。
 6. **配置可靠性**：配置变更串行执行，写入临时文件后替换 `registry.json`，并保留 `.bak`。注册表损坏时服务报错停止，不以空配置覆盖原文件。
@@ -33,6 +33,7 @@
 
 - 管理接口均位于主服务的 `/api` 下，只接受 `Host: 127.0.0.1:<主端口>`。
 - 浏览器请求还必须是同源（`Origin` 为主服务地址且 `Sec-Fetch-Site: same-origin`）。写操作另要求 `Content-Type: application/json` 和 `X-Workbench: 1`，用于 CSRF 防护。
+- 无额外参数的 `DELETE` 等管理请求仍发送 JSON 空对象 `{}`，避免空 JSON 请求体被解析器拒绝。只读的 `POST /api/entries/status` 也遵守相同请求头要求。
 - API 不提供登录、会话、Cookie 或跨域访问；设计前提是单用户本机工作台。
 - 预览服务与主服务是不同来源。预览资源在 sandbox CSP 内运行，且只对来自主服务的请求回送 CORS 响应头。
 
@@ -64,7 +65,7 @@
 | --- | --- |
 | `Project` | `id`、`name`、`order` |
 | `Mount` | `id`、`projectId`、`label`、`absolutePath`、`mode`、`toolDirectories`、`excludes`、`entry`、`enabled` |
-| `Entry` | `id`、`projectId`、`mountId`、`title`、`kind`、`format`、`relativePath`、`resourceRoot`、`updatedAt`、`fileVersion`、`refreshMode`、`status`，HTML 条目还会带 `previewUrl` |
+| `Entry` | `id`、`projectId`、`mountId`、`title`、`kind`、`format`、`relativePath`、`resourceRoot`、`updatedAt`、`fileVersion`、`refreshMode`、`status`、`previewUrl`；是否能够预览仍取决于文件类型。 |
 
 `mode` 仅为 `content`、`tool-library`、`single-tool`；`kind` 仅为 `html`、`tool`、`markdown`、`text`、`data`。新建挂载的默认值是 `mode: "content"`、`entry: "index.html"`、`toolDirectories: []`、`excludes: []`、`enabled: true`。
 
@@ -112,11 +113,21 @@
 | --- | --- | --- |
 | `GET /api/mounts/:id/tree` | `?path=<相对目录>`，省略时为挂载根目录。 | 读取一层目录，返回 `TreeItem[]`：`{ name, relativePath, directory, legacyIds? }`。目录在前；HTML、CSV、Markdown 随后；再按自然排序。 |
 | `GET /api/entries/:id` | `:id` 为文件引用或可恢复的旧 ID。 | 获取单个文件元信息 `Entry`，并追加 `previewUrl`。目录会返回 `400`。 |
-| `GET /api/mounts/:id/file` | `?path=<相对文件路径>` | 读取文本，返回 `{ text, size, updatedAt }`。文件大于 10 MiB 返回 `413`；二进制或不受支持的文本类型返回 `415`。 |
+| `POST /api/entries/status` | `{ ids: string[] }`，最多 200 项。 | 只读批量核对，返回 `{ items: [{ id, status: "ready", fileVersion? } \| { id, status: "error", error: { code, message } }] }`，结果与输入顺序对应。内部去重并最多同时核对 8 项，单项失败不阻断其他项。 |
+| `GET /api/mounts/:id/search` | `?path=<相对目录>&q=<关键词>&limit=100&cursor=<可选游标>` | 在该挂载指定目录及子目录查文件名和路径，返回 `{ items: [{ id, mountId, name, relativePath, format }], nextCursor?, scanned, skipped, done }`。`path` 默认根目录，关键词 1–200 字，`limit` 为 1–200。 |
+| `DELETE /api/file-search/:cursor` | JSON 请求体 `{}`。 | 释放一次目录搜索的游标及目录句柄，返回 `{ ok: true }`；不存在的游标也可安全取消。 |
+| `GET /api/mounts/:id/resource-version` | `?path=<HTML 相对路径>` | 返回同目录直接资源的元数据指纹 `{ version, directory, scope: "same-directory", count }`。入口须为现存 HTML 文件；不读取正文或解析依赖。 |
+| `GET /api/mounts/:id/file` | `?path=<相对文件路径>` | 读取文本，返回 `{ text, size, updatedAt, fileVersion? }`。只有读取前后版本一致才返回 `fileVersion`。文件大于 10 MiB 返回 `413`；二进制或不受支持的文本类型返回 `415`。 |
 | `GET /api/mounts/:id/download` | `?path=<相对文件路径>` | 以 `application/octet-stream` 和附件文件名流式下载任意允许的普通文件。 |
 | `PATCH /api/entries/:id/preferences` | `{ title?, kind?, refreshMode? }` | 保存条目的显示偏好；`refreshMode` 为 `auto` 或 `prompt`。返回 `{ ok: true }`。 |
 
-文本读取支持 HTML、CSS、JavaScript/TypeScript、JSON、CSV、Markdown、TXT、常见代码和配置文件等。文件树和读取均不会递归遍历目录；下载可用于不支持预览或文本读取的允许文件。
+文本读取支持 HTML、CSS、JavaScript/TypeScript、JSON、CSV、Markdown、TXT、常见代码和配置文件等。文件树接口只读一层，文本接口只读指定文件；CSV 表格、JSON 结构和图片缩放由前端完成，后端不会转换原始数值。下载可用于不支持预览或文本读取的允许文件。
+
+目录搜索由用户主动发起，不建立常驻全文或入口索引，不读取正文，也不依赖文件树已加载范围或后缀筛选。每页最多检查 500 个目录项，循环采用约 200 ms 的处理预算，未完成时返回游标；下一页必须保持相同挂载、目录与关键词。游标 5 分钟不使用即过期，同时最多保留 20 次搜索。请求取消、显式取消和服务关闭会清理句柄；挂载配置变化、游标过期或并发读取同一游标会返回明确错误。搜索仍遵循路径、敏感文件和用户排除规则，不跟随链接。
+
+资源指纹仅涵盖 HTML 同目录内的 CSS、JS/MJS、JSON、CSV、图片、字体、WASM 等允许资源；包括新增、修改和删除，但不包括子目录和实际引用关系判断。前端按文件选择是否启用，仅当前可见 HTML 约每 4 秒核对一次，变化只提示手动加载。批量状态、搜索和资源指纹接口均不更改已读状态或注册表。
+
+前端收藏/工具列表可见时使用批量状态接口，收起或隐藏后停止检查。阅读现场、组合与个人备份保存在浏览器中；个人备份不通过这些后端接口读写挂载配置或源文件。
 
 ### 工具分类
 
@@ -174,6 +185,8 @@ SSE 新增 `file-updates` 失效通知，客户端重新拉取快照；连接恢
 | `app/server/path-policy.ts` | 路径归一化、挂载边界、敏感文件过滤与 MIME 白名单。 |
 | `app/server/registry.ts` | 注册表加载、串行修改、原子替换与备份。 |
 | `app/server/files.ts` | 文件类型判断、条目元信息和旧 ID 兼容。 |
+| `app/server/file-search.ts` | 按范围、分页和可取消的文件名/路径搜索。 |
+| `app/server/resource-version.ts` | 同目录直接资源的元数据指纹。 |
 | `app/server/tools.ts` | 工具列表合成逻辑。 |
 | `app/server/html-bridge.ts` | HTML 流式注入与 iframe 桥接脚本。 |
 | `app/shared/model.ts` | Zod 请求/注册表校验规则和共享 TypeScript 类型。 |
