@@ -70,3 +70,9 @@ test('legacy original bindings preserve ancestor resource exclusions',async()=>{
   await register('private/tool.html');await app.main.inject({method:'DELETE',url:`/api/mounts/${mountId}`,headers,payload:{}});
   expect((await old('private/tool.html')).statusCode).toBe(200);expect((await old('private/main.js')).statusCode).toBe(403);
 });
+
+test.skipIf(process.platform!=='win32')('legacy Windows preview matching preserves differently cased old URLs',async()=>{
+  await fs.mkdir(path.join(root,'Mixed'));await fs.writeFile(path.join(root,'Mixed','Tool.HTML'),'<p>mixed case</p>');await fs.writeFile(path.join(root,'Mixed','Main.JS'),'mixed script');
+  await register('Mixed/Tool.HTML');await app.main.inject({method:'DELETE',url:`/api/mounts/${mountId}`,headers,payload:{}});
+  expect((await old('mixed/tool.html')).body).toContain('mixed case');expect((await old('MIXED/main.js')).body).toBe('mixed script');
+});

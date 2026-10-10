@@ -441,9 +441,11 @@ export async function createWorkbench(options: { stateDir: string; port: number;
         const binding=source.legacyPreview;
         if(!binding||binding.mountId!==req.params.id)return [];
         const parent=path.posix.dirname(binding.entryPath),prefix=parent==='.'?'':`${parent}/`;
-        if(!rel.startsWith(prefix)||(rel!==binding.entryPath&&/\.html?$/i.test(rel)))return [];
+        const normalize=(value:string)=>process.platform==='win32'?value.toLowerCase():value;
+        const selected=normalize(rel)===normalize(binding.entryPath);
+        if(!normalize(rel).startsWith(normalize(prefix))||(!selected&&/\.html?$/i.test(rel)))return [];
         const scope=fileScope({...source,absolutePath:binding.absolutePath,excludes:binding.excludes});
-        const resource=rel===binding.entryPath?scope.entry:rel.slice(prefix.length);
+        const resource=selected?scope.entry:rel.slice(prefix.length);
         return [{scope,resource,target:path.resolve(scope.absolutePath,resource)}];
       });
       if(!candidates.length){
