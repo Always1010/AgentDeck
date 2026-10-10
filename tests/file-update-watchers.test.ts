@@ -84,6 +84,84 @@ test('unchanged reconciliation and repeated acknowledgements neither serialize n
   expect(stringify.mock.calls.some(([value]) => value && typeof value === 'object' && 'schemaVersion' in value && 'records' in value)).toBe(false);
 });
 
+test('a partial first baseline tracks readable scopes durably while recovered scopes establish their own baseline', async () => {
+  await updates.close();
+  const state = path.join(temp, 'state');
+  updates = new FileUpdates(state, new PathPolicy(state), () => mounts, emitted);
+  await fs.writeFile(path.join(root, 'old.md'), 'existing readable report');
+  const readDirectory = fs.readdir;
+  const listing = vi.spyOn(fs, 'readdir').mockImplementation(async (directory, options) => {
+    if (String(directory) === nested) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+    return readDirectory(directory, options);
+  });
+  await updates.configure(filter);
+  expect(updates.snapshot().total).toBe(0);
+  expect(updates.snapshot().errors.join(' ')).toContain('部分目录');
+  await fs.writeFile(path.join(root, 'old.md'), 'changed readable report');
+  await fs.writeFile(path.join(root, 'new.md'), 'new readable report');
+  activeWatcher(root)!.callback('change', 'old.md');
+  activeWatcher(root)!.callback('rename', 'new.md');
+  await advance(650);
+  expect(updates.snapshot().items.map(item => [item.relativePath, item.kind]).sort()).toEqual([['new.md', 'added'], ['old.md', 'modified']]);
+  await updates.close();
+  await fs.writeFile(path.join(root, 'offline.md'), 'offline readable addition');
+  updates = new FileUpdates(state, new PathPolicy(state), () => mounts, emitted);
+  await updates.load(); await settle();
+  expect(updates.snapshot().items.map(item => item.relativePath).sort()).toEqual(['new.md', 'offline.md', 'old.md']);
+  listing.mockRestore();
+  // A file notification can initialize only part of a still-unscanned tree.
+  activeWatcher(root)!.callback('change', 'nested/old.md'); await advance(650);
+  expect(updates.snapshot().total).toBe(3);
+  await fs.writeFile(path.join(nested, 'old.md'), 'changed after this file recovered');
+  activeWatcher(root)!.callback('change', 'nested/old.md'); await advance(650);
+  expect(updates.snapshot().items.some(item => item.relativePath === 'nested/old.md' && item.kind === 'modified')).toBe(true);
+  await updates.reconcile();
+  expect(updates.snapshot().total).toBe(4);
+  expect(updates.snapshot().items.some(item => item.relativePath === 'nested/leaf/deep.md')).toBe(false);
+  expect(updates.snapshot().errors).toEqual([]);
+  await fs.writeFile(path.join(nested, 'leaf', 'new.md'), 'new after tree recovery');
+  activeWatcher(path.join(nested, 'leaf'))!.callback('rename', 'new.md'); await advance(650);
+  expect(updates.snapshot().items.some(item => item.relativePath === 'nested/leaf/new.md')).toBe(true);
+});
+
+test.each(['filter expansion', 're-enabled mount', 'moved mount'] as const)('a partial %s baseline advances readable scopes without replaying recovered history', async change => {
+  if (change === 'filter expansion') {
+    await fs.writeFile(path.join(root, 'history.txt'), 'readable text history');
+    await fs.writeFile(path.join(nested, 'history.txt'), 'blocked text history');
+    await fs.writeFile(path.join(nested, 'old.md'), 'known markdown changed during failure');
+  } else if (change === 're-enabled mount') {
+    mounts = [{ ...mounts[0], enabled: false }]; await updates.reconcile();
+    mounts = [{ ...mounts[0], enabled: true }];
+    await fs.writeFile(path.join(root, 'history.md'), 'readable paused history');
+    await fs.writeFile(path.join(nested, 'history.md'), 'blocked paused history');
+  } else {
+    root = path.join(temp, 'replacement'); nested = path.join(root, 'nested');
+    await fs.mkdir(nested, { recursive: true });
+    await fs.writeFile(path.join(root, 'history.md'), 'readable replacement history');
+    await fs.writeFile(path.join(nested, 'history.md'), 'blocked replacement history');
+    mounts = [{ ...mounts[0], absolutePath: root }];
+  }
+  const extension = change === 'filter expansion' ? 'txt' : 'md';
+  const readDirectory = fs.readdir;
+  const listing = vi.spyOn(fs, 'readdir').mockImplementation(async (directory, options) => {
+    if (String(directory) === nested) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+    return readDirectory(directory, options);
+  });
+  if (change === 'filter expansion') await updates.configure({ mode: 'all', extensions: [], custom: [] });
+  else await updates.reconcile();
+  expect(updates.snapshot().total).toBe(0);
+  await fs.writeFile(path.join(root, `history.${extension}`), 'readable change after partial baseline');
+  await fs.writeFile(path.join(root, `new.${extension}`), 'readable addition after partial baseline');
+  activeWatcher(root)!.callback('change', `history.${extension}`);
+  activeWatcher(root)!.callback('rename', `new.${extension}`); await advance(650);
+  expect(updates.snapshot().total).toBe(2);
+  listing.mockRestore(); await updates.reconcile();
+  const items = updates.snapshot().items;
+  expect(items.some(item => item.relativePath === `nested/history.${extension}`)).toBe(false);
+  expect(items.some(item => item.relativePath === 'nested/old.md')).toBe(change === 'filter expansion');
+  expect(items).toHaveLength(change === 'filter expansion' ? 3 : 2);
+});
+
 test('queued background reconciliations and notifications coalesce without missing an in-flight configuration change', async () => {
   const readDirectory = fs.readdir;
   let release!: () => void, entered!: () => void;
