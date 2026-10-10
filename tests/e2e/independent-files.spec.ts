@@ -27,6 +27,33 @@ test.beforeAll(async () => {
   await fs.writeFile(path.join(root, 'tool.html'), '<input id="draft"><p>独立 HTML</p>');
   await fs.writeFile(path.join(root, 'data.csv'), 'name,value\napple,12');
   await fs.writeFile(path.join(root, 'archive.zip'), Buffer.from([0, 1, 2]));
+  await fs.writeFile(path.join(root, 'plain.txt'), '独立文本');
+  await fs.writeFile(path.join(root, 'pixel.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhS8AAAAASUVORK5CYII=', 'base64'));
+});
+
+test('reselecting an image exits source mode for HTML, SVG and plain text references', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  for (const name of ['tool.html', 'image.svg', 'plain.txt']) {
+    await openFile(page, path.join(root, name));
+    const viewer = page.getByRole('tabpanel');
+    await viewer.getByRole('button', { name: '查看源码', exact: true }).click();
+    await expect(viewer.getByRole('button', { name: '返回阅读', exact: true })).toBeEnabled();
+    await expect(viewer.locator('pre')).toBeVisible();
+    const id = new URL(page.url()).searchParams.get('entry');
+    await viewer.getByRole('button', { name: '更多设置', exact: true }).click();
+    await page.getByRole('button', { name: '重新选择文件', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: '重新选择文件', exact: true });
+    const target = path.join(root, `pixel-${name}.png`);
+    await fs.copyFile(path.join(root, 'pixel.png'), target);
+    await dialog.getByLabel('文件路径').fill(target);
+    await dialog.getByRole('button', { name: '保存路径', exact: true }).click();
+    await expect(viewer.getByRole('img')).toBeVisible();
+    await expect(viewer.getByText('1 × 1')).toBeVisible();
+    await expect(viewer.locator('pre')).toHaveCount(0);
+    await expect(viewer.getByRole('button', { name: '查看源码', exact: true })).toBeDisabled();
+    expect(new URL(page.url()).searchParams.get('entry')).toBe(id);
+    await page.getByRole('tablist').getByRole('button', { name: /^关闭页面：/ }).click();
+  }
 });
 test.afterAll(async () => { await fs.rm(root, { recursive: true, force: true }); });
 test.beforeEach(async ({ page }) => {
