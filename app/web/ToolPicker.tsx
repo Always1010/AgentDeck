@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ToolSource } from '../shared/model.js';
+import type { FileSource } from '../shared/model.js';
 import { api } from './api.js';
 import { Dialog } from './Dialog.js';
 import { HtmlFilePicker, parentDirectory } from './HtmlFilePicker.js';
@@ -14,7 +14,7 @@ function suggestedName(file: string) {
   return /^index\.html?$/i.test(filename) ? parts.at(-2) || '工具' : filename.replace(/\.html?$/i, '');
 }
 
-export function ToolPicker({ source, title, close, saved }: { source?: ToolSource; title?: string; close: () => void; saved: (id: string, duplicate: boolean) => void }) {
+export function ToolPicker({ source, title, close, saved }: { source?: FileSource; title?: string; close: () => void; saved: (id: string, duplicate: boolean) => void }) {
   const [file, setFile] = useState(source?.absolutePath || '');
   const [name, setName] = useState(title || '');
   const [nameEdited, setNameEdited] = useState(!!source);

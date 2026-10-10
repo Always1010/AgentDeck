@@ -1,7 +1,7 @@
 import { parseFileReference, type Snapshot } from '../shared/model.js';
 
 export function fullFilePath(snapshot: Snapshot, id: string) {
-  const source = snapshot.toolSources?.find(source => source.id === id);
+  const source = snapshot.fileSources?.find(source => source.id === id);
   if (source) return source.absolutePath;
   const reference = parseFileReference(id);
   const mount = snapshot.mounts.find(item => item.id === reference?.mountId);
@@ -11,7 +11,7 @@ export function fullFilePath(snapshot: Snapshot, id: string) {
 }
 
 export function treeFileReference(snapshot: Snapshot, id: string) {
-  const source = snapshot.toolSources?.find(source => source.id === id);
+  const source = snapshot.fileSources?.find(source => source.id === id);
   if (!source) {
     const ref = parseFileReference(id);
     return ref && snapshot.mounts.some(m => m.id === ref.mountId && m.enabled) ? ref : undefined;

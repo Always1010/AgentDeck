@@ -12,7 +12,7 @@ export function pageLabel(page: OpenPage, pages: OpenPage[], snapshot: Snapshot)
   const project = snapshot.projects.find(p => p.id === mount?.projectId);
   const directory = ref?.relativePath.split('/').slice(0, -1).join('/');
   const duplicate = pages.some(p => p.id !== page.id && (p.title || parseFileReference(p.id)?.relativePath.split('/').pop() || '旧文件') === name);
-  const source = snapshot.toolSources?.find(source => source.id === page.id);
+  const source = snapshot.fileSources?.find(source => source.id === page.id);
   const context = source ? source.absolutePath.split(/[\\/]/).slice(0,-1).join('/') : [project?.name, mount?.label, directory].filter(Boolean).join(' / ');
   const path = fullFilePath(snapshot, page.id) || ref?.relativePath || page.id;
   return { name, display: duplicate ? `${name} · ${context || ref?.mountId || page.id}` : name, path };
