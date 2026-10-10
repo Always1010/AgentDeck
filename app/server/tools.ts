@@ -54,5 +54,6 @@ export function toolScope(source: ToolSource): Mount {
 export function toolExcludes(mount: Mount, entryPath: string) {
   const parent = path.posix.dirname(entryPath);
   const prefix = parent === '.' ? '' : `${parent}/`;
-  return mount.excludes.filter(exclude => exclude.startsWith(prefix)).map(exclude => exclude.slice(prefix.length));
+  const normalized = (value: string) => process.platform === 'win32' ? value.toLowerCase() : value;
+  return mount.excludes.filter(exclude => normalized(exclude) !== normalized(entryPath) && normalized(exclude).startsWith(normalized(prefix))).map(exclude => exclude.slice(prefix.length));
 }

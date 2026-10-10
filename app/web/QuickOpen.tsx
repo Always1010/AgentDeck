@@ -4,7 +4,7 @@ import { parseFileReference, type Snapshot, type ToolItem } from '../shared/mode
 import type { OpenPage } from './pages.js';
 import { api } from './api.js';
 import { Dialog } from './Dialog.js';
-import { fullFilePath } from './fileLocations.js';
+import { fullFilePath, treeFileReference } from './fileLocations.js';
 import './quickOpen.css';
 
 export function QuickOpen({ snapshot, pages, favorites, tools, open, reveal, close }: {
@@ -80,7 +80,7 @@ export function QuickOpen({ snapshot, pages, favorites, tools, open, reveal, clo
   function choose(id: string, locate = false) { close(); if (locate) reveal(id); else open(id); }
   function row(id: string, title: string, category?: string) {
     const location = fullFilePath(snapshot, id) || parseFileReference(id)?.relativePath || id;
-    return <li key={id}><button className="quick-open-file" title={location} onClick={() => choose(id)}><strong>{title}</strong>{category && <span>{category}</span>}<small>{location}</small></button><button aria-label={`在目录定位：${title}`} onClick={() => choose(id, true)}>定位</button></li>;
+    return <li key={id}><button className="quick-open-file" title={location} onClick={() => choose(id)}><strong>{title}</strong>{category && <span>{category}</span>}<small>{location}</small></button>{treeFileReference(snapshot,id)&&<button aria-label={`在目录定位：${title}`} onClick={() => choose(id, true)}>定位</button>}</li>;
   }
   return <Dialog label="快速打开" close={close} className="quick-open-dialog">
     <header><h2>快速打开</h2><button aria-label="关闭快速打开" onClick={close}>×</button></header>

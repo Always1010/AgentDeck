@@ -44,7 +44,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   for (const tool of listTools(registry.data, aliases)) {
     if (registry.data.toolSources?.some(source => source.id === tool.id)) continue;
     const ref = parseFileReference(tool.id);
-    const m = ref && registry.data.mounts.find(m => m.id === ref.mountId && m.enabled);
+    const m = ref && registry.data.mounts.find(m => m.id === ref.mountId);
     if (!ref || !m) continue;
     try { relative(ref.relativePath, false); } catch { continue; }
     if (hidden(ref.relativePath, m.excludes)) continue;
@@ -167,7 +167,8 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     if (source) {
       const scope = toolScope(source);
       const e = await describeFile(policy, registry.data, scope, scope.entry);
-      return { ...e, ...registry.data.entryPreferences[source.id], id: source.id, mountId: ref.mountId, relativePath: ref.relativePath, resourceRoot: path.posix.dirname(ref.relativePath), previewUrl: previewOrigin + toolPreviewPath(source) };
+      const parent = path.posix.dirname(ref.relativePath);
+      return { ...e, ...registry.data.entryPreferences[source.id], id: source.id, mountId: ref.mountId, projectId: registry.data.mounts.find(m => m.id === ref.mountId)?.projectId || '', relativePath: ref.relativePath, resourceRoot: parent === '.' ? '' : parent, previewUrl: previewOrigin + toolPreviewPath(source) };
     }
     const e=await describeFile(policy,registry.data,mount(ref.mountId),ref.relativePath);
     return {...e,previewUrl:previewOrigin+previewPath(e.mountId,e.relativePath)};
@@ -217,7 +218,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
       const file = await entry(input.id);
       if (!/^html?$/.test(file.format)) throw new AppError('INVALID_TOOL', '请选择 HTML 网页作为工具', 400);
       preferredId = file.id;
-      existingTitle = file.title;
+      existingTitle = /^index\.html?$/i.test(file.title) ? undefined : file.title;
       absolutePath = sourceFor(file.id)?.absolutePath || path.join(mount(file.mountId).absolutePath, file.relativePath);
     }
     const real = await policy.toolLocation(absolutePath!);
@@ -304,7 +305,13 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     const scope = toolScope(source);
     // Validate the entry too: missing/moved entries must not leave an orphan resource scope.
     await policy.resolve(scope, scope.entry);
-    const file = await policy.resolve(scope, req.params['*']);
+    let rel = req.params['*'];
+    let file = await policy.resolve(scope, rel);
+    if (file.stat.isDirectory()) {
+      if (!req.url.split('?')[0].endsWith('/')) return reply.redirect(req.url.split('?')[0] + '/', 302);
+      rel = [rel.replace(/\/$/, ''), 'index.html'].filter(Boolean).join('/');
+      file = await policy.resolve(scope, rel);
+    }
     if (!file.stat.isFile()) throw new AppError('INVALID_PATH', '工具资源必须是普通文件', 400);
     const requestedVersion = new URL(req.url, previewOrigin).searchParams.get('fileVersion');
     if (requestedVersion && requestedVersion !== fileVersion(file.stat)) throw new AppError('FILE_CHANGED', '文件已再次更新，请重新加载', 409);
