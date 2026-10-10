@@ -5,11 +5,11 @@
 ## 最终结果
 
 - TypeScript 全局检查、服务端编译及 Vite 正式构建通过。
-- 本次 Vitest 关联回归：8 个文件、47 项通过，覆盖工具、路径安全、资源指纹、标签状态、个人备份、阅读现场、旧引用与目录搜索；后续工具和安全相关修正重跑对应文件通过。
-- 本次 Windows Edge / Playwright 关联回归：6 个文件、28 项通过，覆盖工具、标签、快速打开与定位、隐藏检查、资源提示和帮助。修正原有 `index.html` 命名兼容及选择器初始读取覆盖输入后，对应回归通过；路径断言使用真实路径，正确处理 Windows 短路径别名。
+- 本次单文件打开功能的 Vitest 关联回归：12 个文件、61 项通过，覆盖独立文件接口、工具兼容、路径安全、文件读取、资源指纹、标签和分屏状态、个人备份、阅读现场及 Markdown；重新选择后类型变化与工具分类的补充断言已通过对应回归，重复运行不累加计数。
+- 本次 Windows Edge / Playwright 关联回归：5 个文件、16 项通过，覆盖单文件选择与粘贴、Markdown 相对图片与文档链接、下载兜底、HTML 工作台内打开、工具分类时保留输入、重复打开与分屏、收藏和现场恢复、移动文件重新定位、快速打开、侧栏和帮助。390 × 844 深色打开弹窗截图已核对；初轮新测试的选择器、命名假设与刷新时重置收藏的设置已修正，修正后的用例均通过。
 - 本次没有重跑全量；上次全量基线为 2026-09-30 的 Vitest 28 个文件、151 项与 Playwright 102 项通过，不作为新增实现的全量验证结论。
-- 本机后台已经加载新构建，4310 工作台与 4311 预览服务可用，新增 HTML 文件选择接口实测正常；重启前后的 6 个项目与 6 个挂载 ID 一致。浏览器页面刷新后显示新入口，刷新前需保存工具输入。
-- 构建仍报告主包体积及 Zod 注释提示，不影响构建成功；当前主包约 644 kB，gzip 约 203 kB。
+- 正式构建已生成，本次功能在隔离测试实例中验证。现有 4310/4311 后台实例仍运行于改动前，本次未重启用户实例；使用新功能前需先保存页面输入，执行 `npm run background:restart`，再刷新浏览器。
+- 构建仍报告主包体积及 Zod 注释提示，不影响构建成功；当前主包约 649 kB，gzip 约 205 kB。
 
 ## 覆盖范围
 
@@ -20,6 +20,7 @@
 - 更新检测：未读水位、单文件确认、文本自动更新、HTML 手动更新、可选的同目录资源变化提示、隐藏列表暂停和恢复后补查。
 - 长期使用：独立阅读现场、命名和固定、常用组合副本、占用保护、个人备份下载与导入、白名单校验及事务失败回滚。
 - 独立工具：无项目和挂载时选取 HTML、粘贴带引号路径、中文与空格路径、默认命名、真实路径去重、服务重启保留、取消项目后的读取、失效状态、重新选择文件保留 ID、移除分类保留文件与收藏、CSS 子目录和 HTML 子页面、资源排除项与越界/敏感路径/junction 拦截。深色添加弹窗和文件选择器截图已经核对，截图仅留在忽略的测试输出中。
+- 单文件打开：无项目时从顶部或空白阅读区选取文件、带引号路径、默认保留标签、同区重复复用、跨区对照、HTML 即使全局选择浏览器打开也留在工作台、Markdown 相对图片与文档链接、CSV、SVG、代码和不支持类型的下载、独立来源重启恢复、旧 `toolSources` 兼容、重新选择保持 ID 与收藏、文件类型变化后加入工具、挂载引用复用及停用/排除限制。HTML、Markdown 和普通文件分别验证资源范围；没有将独立父目录加入项目。
 - 运行边界：正式与开发模式、端口占用、服务重启、浏览器进程重启、持久浏览器 profile、主服务和预览服务隔离。
 
 2026-09-30 的全量基线包含 AD-030（程序滚动错误提升现场活跃时间）和 AD-031（新增顶部入口挤出窄屏帮助按钮）的修复验证；原有断言保留。
@@ -39,8 +40,9 @@
 ```powershell
 npm run typecheck
 npm run build
-node node_modules/vitest/vitest.mjs run tests/tools.test.ts tests/security.test.ts tests/resource-version.test.ts tests/pages.test.ts tests/personalBackup.test.ts tests/readingSessions.test.ts tests/legacy-references.test.ts tests/file-search.test.ts
-node node_modules/@playwright/test/cli.js test tests/e2e/tools.spec.ts tests/e2e/pages.spec.ts tests/e2e/convenience.spec.ts tests/e2e/polling.spec.ts tests/e2e/viewers-resources.spec.ts tests/e2e/help.spec.ts
+node node_modules/vitest/vitest.mjs run tests/independent-files.test.ts tests/tools.test.ts tests/files.test.ts tests/http.test.ts tests/security.test.ts tests/m0.test.ts tests/markdown.test.ts tests/pages.test.ts tests/workspace.test.ts tests/readingSessions.test.ts tests/personalBackup.test.ts tests/resource-version.test.ts
+node node_modules/@playwright/test/cli.js test tests/e2e/independent-files.spec.ts tests/e2e/tools.spec.ts tests/e2e/desktop.spec.ts tests/e2e/help.spec.ts
+node node_modules/@playwright/test/cli.js test tests/e2e/convenience.spec.ts --grep "reopens|quick open"
 ```
 
 浏览器测试使用隔离状态和临时目录，不读写用户的 AgentDeck 配置。Windows 默认使用本机 Edge；其他系统可通过 `PLAYWRIGHT_CHANNEL` 选择已安装浏览器。后台安装和恢复的专项验证见 [后台运行说明](BACKGROUND.md)。
@@ -50,7 +52,7 @@ node node_modules/@playwright/test/cli.js test tests/e2e/tools.spec.ts tests/e2e
 - 未完成 macOS/Linux、Firefox/Safari、真实移动设备、完整屏幕阅读器和所有物理输入法组合的全量验证。
 - 未进行超过 1000 文件的长时间压力测试、真实网络盘/UNC、物理磁盘拔插、系统断电恢复或多个服务共享同一状态目录的测试。
 - 不保证任意第三方 HTML 的内部功能、CDN/API 可用性、所有字体和媒体格式、根绝对资源或 history 路由无需调整即可运行。
-- 独立工具不自动扩大到入口的上级目录，也不自动追踪改名或移动；用户需重新选择路径。放在用户主目录或盘符根目录的入口，仅开放所选 HTML 与静态资源；没有在真实盘符根目录创建测试工具，相关允许位置由路径策略回归核对。
+- 独立文件和工具不自动扩大到入口的上级目录，也不自动追踪改名或移动；用户需重新选择路径。放在用户主目录或盘符根目录的入口，仅开放所选文件与允许静态资源；没有在真实盘符根目录创建测试入口，相关允许位置由路径策略回归核对。
 - 所有项目共用预览来源，不提供不互信项目或多用户之间的机密隔离。
-- 个人备份不包含挂载源文件和网页工具临时输入；同目录资源提示不解析实际依赖，也不覆盖子目录。
+- 个人备份不包含挂载源文件、独立来源位置配置和网页工具临时输入；换机导入备份不能自动恢复独立文件引用。同目录资源提示不解析实际依赖，也不覆盖子目录。
 - PDF、Office、全文检索、智能重命名追踪、脚本构建执行和原子多文件发布不属于当前能力。
