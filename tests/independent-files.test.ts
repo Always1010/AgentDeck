@@ -92,4 +92,8 @@ test('reselecting a missing independent file preserves identity and rejects dupl
   await fs.writeFile(path.join(root, 'other.md'), '# Other'); await open(path.join(root, 'other.md'));
   expect((await reselect(path.join(root, 'other.md'))).statusCode).toBe(409);
   expect((await entry(id)).json().previewUrl).toBe(e.previewUrl);
+  const html = path.join(root, 'moved.html'); await fs.rename(moved, html);
+  expect((await reselect(html)).statusCode).toBe(200);
+  expect((await app.main.inject({ method: 'PUT', url: '/api/tools', headers, payload: { id } })).json().id).toBe(id);
+  expect((await app.main.inject({ url: '/api/tools', headers })).json()).toEqual([{ id, title: 'My notes' }]);
 });

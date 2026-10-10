@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { FileSource } from '../shared/model.js';
 import { api } from './api.js';
 import { Dialog } from './Dialog.js';
-import { HtmlFilePicker, parentDirectory } from './HtmlFilePicker.js';
+import { FilePicker, parentDirectory } from './FilePicker.js';
 import { Icon } from './Icon.js';
 import { usePreference } from './preferences.js';
 
@@ -43,6 +43,6 @@ export function ToolPicker({ source, title, close, saved }: { source?: FileSourc
     {source && <p className="muted">重新选择后，已打开的该工具会加载新文件。请先保存页面中的输入。</p>}
     {error && <p role="alert">{error}</p>}
     <footer><button disabled={busy} onClick={close}>取消</button><button className="primary" disabled={busy || !/\.html?$/i.test(cleanPath(file))} onClick={() => void save()}>{busy ? '保存中…' : source ? '保存路径' : '添加工具'}</button></footer>
-    {picker && <HtmlFilePicker initial={cleanPath(file) ? parentDirectory(cleanPath(file)) : lastDirectory} close={() => setPicker(false)} choose={value => { choose(value); setLastDirectory(parentDirectory(value)); setPicker(false); }}/>}
+    {picker && <FilePicker htmlOnly initial={cleanPath(file) ? parentDirectory(cleanPath(file)) : lastDirectory} close={() => setPicker(false)} choose={value => { choose(value); setLastDirectory(parentDirectory(value)); setPicker(false); }}/>}
   </Dialog>;
 }
