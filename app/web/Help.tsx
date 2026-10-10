@@ -33,7 +33,7 @@ function PromptTemplates({ snapshot, selected }: { snapshot: Snapshot; selected:
   const mount = mounts.find(m => m.id === mountId);
   const project = snapshot.projects.find(p => p.id === mount?.projectId);
   const root = mount?.absolutePath || '【填写实际输出目录的绝对路径】';
-  const current = snapshot.toolSources?.some(source => source.id === selected) ? fullFilePath(snapshot, selected)! : mount && reference?.mountId === mount.id ? joinPath(root, reference.relativePath) : '【填写需要处理的文件绝对路径】';
+  const current = snapshot.fileSources?.some(source => source.id === selected) ? fullFilePath(snapshot, selected)! : mount && reference?.mountId === mount.id ? joinPath(root, reference.relativePath) : '【填写需要处理的文件绝对路径】';
   const context = `我使用 AgentDeck 浏览本地成果。${project ? `项目名称：${project.name}。` : ''}
 成果目录：${root}
 请先确认你能访问这个目录；不能访问时，说明需要我提供哪些文件或如何转移成果。`;

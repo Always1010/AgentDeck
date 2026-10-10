@@ -88,7 +88,7 @@ test('mounted tools keep their ID and survive project removal; relocated tools k
   const other = path.join(temp,'other.html'); await fs.writeFile(other,'<p>other</p>');
   await app.main.inject({method:'PUT',url:'/api/tools',headers,payload:{absolutePath:other}});
   expect((await app.main.inject({method:'PATCH',url:`/api/tools/${encodeURIComponent(id)}`,headers,payload:{absolutePath:other}})).statusCode).toBe(409);
-  const otherId = app.registry.data.toolSources!.find(source => source.absolutePath.endsWith('other.html'))!.id;
+  const otherId = app.registry.data.fileSources!.find(source => source.absolutePath.endsWith('other.html'))!.id;
   await app.main.inject({method:'DELETE',url:`/api/tools/${encodeURIComponent(otherId)}`,headers,payload:{}});
   await app.main.inject({method:'DELETE',url:`/api/tools/${encodeURIComponent(id)}`,headers,payload:{}});
   expect((await app.main.inject({url:'/api/tools',headers})).json()).toEqual([]);

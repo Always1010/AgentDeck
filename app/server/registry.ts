@@ -10,7 +10,12 @@ export class Registry {
   async load() {
     await fs.mkdir(this.directory, { recursive: true });
     this.directory = await fs.realpath(this.directory);
-    try { this.data = registrySchema.parse(JSON.parse(await fs.readFile(this.file, 'utf8'))); }
+    try {
+      const stored = JSON.parse(await fs.readFile(this.file, 'utf8'));
+      // Older HTML tool sources already have stable IDs; preserve them verbatim.
+      if (stored.fileSources === undefined && stored.toolSources !== undefined) stored.fileSources = stored.toolSources;
+      this.data = registrySchema.parse(stored);
+    }
     catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw new AppError('REGISTRY_CORRUPT', `注册表损坏，原文件已保留。停止服务后从 ${this.file}.bak 恢复。`, 500);
       this.data = { schemaVersion: 1, revision: 0, projects: [], mounts: [], toolOverrides: [], entryPreferences: {} };

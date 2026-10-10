@@ -17,10 +17,10 @@ import { AppError } from './errors.js';
 import { describeFile, isTextFile, legacyIds } from './files.js';
 import { parseFileReference } from '../shared/model.js';
 import { readLegacyReferences } from './legacy-references.js';
-import { listTools, sameFile, toolScope, defaultToolTitle, toolExcludes } from './tools.js';
+import { listTools, sameFile, fileScope, defaultToolTitle, fileExcludes } from './tools.js';
 import { bridgeScriptPath, htmlBridgeScript, prepareHtmlBridge } from './html-bridge.js';
 import type { ServerResponse } from 'node:http';
-import { projectInput, mountInput, mountPatch, preferenceSchema, overrideSchema, previewPath, toolPreviewPath, fileReference, type Mount, type RegistryData, type TreeItem, type ToolSource } from '../shared/model.js';
+import { projectInput, mountInput, mountPatch, preferenceSchema, overrideSchema, previewPath, filePreviewPath, fileReference, type Mount, type RegistryData, type TreeItem, type FileSource } from '../shared/model.js';
 
 export async function createWorkbench(options: { stateDir: string; port: number; previewPort: number; webDir?: string; dev?: boolean }) {
   const registry = new Registry(path.resolve(options.stateDir)); await registry.load();
@@ -39,10 +39,10 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   for (const [id, target] of Object.entries(legacyReferences)) aliases.set(id, parseFileReference(target)!);
   const mount = (id: string) => { const m = registry.data.mounts.find(m => m.id === id); if (!m) throw new AppError('MOUNT_NOT_FOUND', '挂载不存在', 404); return m; };
   // Migrate known registrations without discovering/scanning files; IDs and names stay intact.
-  const migrated: ToolSource[] = [];
+  const migrated: FileSource[] = [];
   const migrationTitles = new Map<string, string>();
   for (const tool of listTools(registry.data, aliases)) {
-    if (registry.data.toolSources?.some(source => source.id === tool.id)) continue;
+    if (registry.data.fileSources?.some(source => source.id === tool.id)) continue;
     const ref = parseFileReference(tool.id);
     const m = ref && registry.data.mounts.find(m => m.id === ref.mountId);
     if (!ref || !m) continue;
@@ -50,19 +50,19 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     if (hidden(ref.relativePath, m.excludes)) continue;
     const absolutePath = path.resolve(m.absolutePath, ref.relativePath);
     if (!inside(m.absolutePath, absolutePath)) continue;
-    migrated.push({ key: randomUUID(), id: tool.id, absolutePath, excludes: toolExcludes(m, ref.relativePath) });
+    migrated.push({ key: randomUUID(), id: tool.id, absolutePath, excludes: fileExcludes(m, ref.relativePath) });
     migrationTitles.set(tool.id, tool.title);
   }
   if (migrated.length) await registry.mutate(d => {
-    (d.toolSources ||= []).push(...migrated);
+    (d.fileSources ||= []).push(...migrated);
     for (const source of migrated) d.entryPreferences[source.id] = { ...d.entryPreferences[source.id], kind: 'tool', title: migrationTitles.get(source.id)! };
   });
-  const sourceFor = (id: string) => registry.data.toolSources?.find(source => source.id === id);
-  const sourceByKey = (key: string) => { const source = registry.data.toolSources?.find(source => source.key === key); if (!source) throw new AppError('INVALID_TOOL', '工具来源不存在', 404); return source; };
+  const sourceFor = (id: string) => registry.data.fileSources?.find(source => source.id === id);
+  const sourceByKey = (key: string) => { const source = registry.data.fileSources?.find(source => source.key === key); if (!source) throw new AppError('ENTRY_MISSING', '文件来源不存在', 404); return source; };
   function fileAccess(mountId: string, rel: string) {
     relative(rel, false);
     const source = sourceFor(fileReference(mountId, rel));
-    return source ? { mount: toolScope(source), path: path.basename(source.absolutePath) } : { mount: mount(mountId), path: rel };
+    return source ? { mount: fileScope(source), path: path.basename(source.absolutePath) } : { mount: mount(mountId), path: rel };
   }
   for (const [app, origin] of [[main, mainOrigin], [preview, previewOrigin]] as const) {
     app.setErrorHandler((err, _req, reply) => {
@@ -115,7 +115,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     const heartbeat=setInterval(()=>reply.raw.write(': heartbeat\n\n'),15000);
     req.raw.on('close',()=>{clients.delete(reply.raw);clearInterval(heartbeat);});
   });
-  main.get('/api/projects', async () => ({ projects: [...registry.data.projects].sort((a,b) => a.order-b.order), mounts: await Promise.all(registry.data.mounts.map(async m=>{if(!m.enabled)return {...m,status:'disabled'};try{await policy.root(m.absolutePath);return {...m,status:'online'};}catch(e){return {...m,status:'offline',error:(e as Error).message};}})), revision: registry.data.revision, toolSources: registry.data.toolSources || [] }));
+  main.get('/api/projects', async () => ({ projects: [...registry.data.projects].sort((a,b) => a.order-b.order), mounts: await Promise.all(registry.data.mounts.map(async m=>{if(!m.enabled)return {...m,status:'disabled'};try{await policy.root(m.absolutePath);return {...m,status:'online'};}catch(e){return {...m,status:'offline',error:(e as Error).message};}})), revision: registry.data.revision, fileSources: registry.data.fileSources || [] }));
   main.post('/api/projects', async req => {
     const body = req.body as Record<string, unknown>; const data = projectInput.parse(body);
     return changed(async d => {
@@ -148,27 +148,89 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     const current = await fs.realpath(value); const dirs = await fs.readdir(current, { withFileTypes: true });
     return { current, parent: path.dirname(current), directories: dirs.filter(d => d.isDirectory() && !d.isSymbolicLink() && !d.name.startsWith('.')).map(d => ({ name: d.name, path: path.join(current,d.name) })) };
   });
-  main.get('/api/fs/html-files', async req => {
-    const { absolutePath } = z.object({ absolutePath: z.string().min(1) }).parse(req.query);
-    const current = await policy.toolLocation(absolutePath, true);
+  async function selectedLocation(value: string, directory = false) {
+    const real = await policy.fileLocation(value, directory);
+    // Opening a file must not turn disabled/excluded mounted content into an independent source.
+    for (const m of registry.data.mounts.filter(m => inside(m.absolutePath, real))) {
+      await policy.resolve(m, path.relative(m.absolutePath, real).split(path.sep).join('/'), false, 'file');
+    }
+    return real;
+  }
+  async function listLocalFiles(value: string, htmlOnly: boolean) {
+    const current = htmlOnly ? await policy.toolLocation(value, true) : await selectedLocation(value, true);
     const children = await fs.readdir(current, { withFileTypes: true });
     const items = await mapLimited(children, 8, async child => {
-      if (child.isSymbolicLink() || (!child.isDirectory() && !/\.html?$/i.test(child.name))) return undefined;
+      if (child.isSymbolicLink() || (!child.isDirectory() && !child.isFile()) || (htmlOnly && !child.isDirectory() && !/\.html?$/i.test(child.name))) return undefined;
       const absolutePath = path.join(current, child.name);
-      try { await policy.toolLocation(absolutePath, child.isDirectory()); return { name: child.name, absolutePath, directory: child.isDirectory() }; }
+      try {
+        if (htmlOnly) await policy.toolLocation(absolutePath, child.isDirectory());
+        else await selectedLocation(absolutePath, child.isDirectory());
+        return { name: child.name, absolutePath, directory: child.isDirectory() };
+      }
       catch { return undefined; }
     });
     return { current, parent: path.dirname(current), items: items.filter(item => !!item).sort((a,b) => Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name, 'zh-CN', { numeric: true })) };
+  }
+  main.get('/api/fs/html-files', async req => {
+    const { absolutePath } = z.object({ absolutePath: z.string().min(1) }).parse(req.query);
+    return listLocalFiles(absolutePath, true);
+  });
+  main.get('/api/fs/files', async req => {
+    const { absolutePath } = z.object({ absolutePath: z.string().min(1) }).parse(req.query);
+    return listLocalFiles(absolutePath, false);
+  });
+  function rememberFile(d: RegistryData, real: string, resourceScope?: Mount) {
+    const existing = d.fileSources?.find(source => sameFile(source.absolutePath, real));
+    if (existing) return { id: existing.id };
+    const m = d.mounts.find(m => inside(m.absolutePath, real));
+    if (m) return { id: fileReference(m.id, path.relative(m.absolutePath, real).split(path.sep).join('/')) };
+    const key = randomUUID();
+    const source: FileSource = { key, id: fileReference(key, path.basename(real)), absolutePath: real,
+      ...(resourceScope ? { excludes: fileExcludes(resourceScope, path.relative(resourceScope.absolutePath, real).split(path.sep).join('/')) } : {}) };
+    (d.fileSources ||= []).push(source);
+    return { id: source.id };
+  }
+  main.post('/api/files/open', async req => {
+    const { absolutePath } = z.object({ absolutePath: z.string().trim().min(1) }).parse(req.body);
+    return changed(async d => rememberFile(d, await selectedLocation(absolutePath.replace(/^"(.*)"$/s, '$1'))));
+  });
+  main.post<{ Params: { id: string } }>('/api/files/:id/links', async req => {
+    const { path: rel } = z.object({ path: z.string().min(1) }).parse(req.body);
+    return changed(async d => {
+      const source = d.fileSources?.find(source => source.id === req.params.id);
+      if (!source) throw new AppError('ENTRY_MISSING', '文件来源不存在', 404);
+      const scope = fileScope(source);
+      await policy.resolve(scope, scope.entry, false, 'file');
+      const file = await policy.resolve(scope, rel, false, 'file');
+      if (!file.stat.isFile()) throw new AppError('INVALID_PATH', '请选择普通文件', 400);
+      return rememberFile(d, await selectedLocation(file.real), scope);
+    });
+  });
+  main.patch<{ Params: { id: string } }>('/api/files/:id', async req => {
+    const { absolutePath } = z.object({ absolutePath: z.string().trim().min(1) }).parse(req.body);
+    return changed(async d => {
+      const source = d.fileSources?.find(source => source.id === req.params.id);
+      if (!source) throw new AppError('ENTRY_MISSING', '文件来源不存在', 404);
+      const real = await selectedLocation(absolutePath.replace(/^"(.*)"$/s, '$1'));
+      if (d.entryPreferences[source.id]?.kind === 'tool' && !/\.html?$/i.test(real)) throw new AppError('INVALID_TOOL', '工具需重新选择 HTML 文件', 400);
+      const duplicate = d.fileSources?.find(other => other.id !== source.id && sameFile(other.absolutePath, real));
+      const mounted = d.mounts.find(m => inside(m.absolutePath, real));
+      const mountedId = mounted && fileReference(mounted.id, path.relative(mounted.absolutePath, real).split(path.sep).join('/'));
+      if (duplicate || (mountedId && mountedId !== source.id)) throw new AppError('FILE_EXISTS', '此文件已有引用，请直接打开该文件', 409, { id: duplicate?.id || mountedId });
+      source.absolutePath = real;
+      source.excludes = mounted ? fileExcludes(mounted, path.relative(mounted.absolutePath, real).split(path.sep).join('/')) : [];
+      return { id: source.id };
+    });
   });
   async function entry(id:string) {
     const ref=parseFileReference(id)||aliases.get(id);
     if(!ref)throw new AppError('ENTRY_MISSING','旧链接尚未关联文件，请展开原目录后重试',404);
     const source = sourceFor(fileReference(ref.mountId, ref.relativePath));
     if (source) {
-      const scope = toolScope(source);
+      const scope = fileScope(source);
       const e = await describeFile(policy, registry.data, scope, scope.entry);
       const parent = path.posix.dirname(ref.relativePath);
-      return { ...e, ...registry.data.entryPreferences[source.id], id: source.id, mountId: ref.mountId, projectId: registry.data.mounts.find(m => m.id === ref.mountId)?.projectId || '', relativePath: ref.relativePath, resourceRoot: parent === '.' ? '' : parent, previewUrl: previewOrigin + toolPreviewPath(source) };
+      return { ...e, ...registry.data.entryPreferences[source.id], id: source.id, mountId: ref.mountId, projectId: registry.data.mounts.find(m => m.id === ref.mountId)?.projectId || '', relativePath: ref.relativePath, resourceRoot: parent === '.' ? '' : parent, previewUrl: previewOrigin + filePreviewPath(source), sourceKey: source.key };
     }
     const e=await describeFile(policy,registry.data,mount(ref.mountId),ref.relativePath);
     return {...e,previewUrl:previewOrigin+previewPath(e.mountId,e.relativePath)};
@@ -223,7 +285,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     }
     const real = await policy.toolLocation(absolutePath!);
     return changed(d => {
-      const sources = d.toolSources ||= [];
+      const sources = d.fileSources ||= [];
       let source = sources.find(source => sameFile(source.absolutePath, real));
       const alreadyRegistered = !!source && d.entryPreferences[source.id]?.kind === 'tool';
       if (!source) {
@@ -231,7 +293,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
         const existingMount = d.mounts.find(m => inside(m.absolutePath, real));
         const candidate = preferredId || (existingMount ? fileReference(existingMount.id, path.relative(existingMount.absolutePath, real).split(path.sep).join('/')) : undefined);
         const id = candidate && !sources.some(source => source.id === candidate) ? candidate : fileReference(key, path.basename(real));
-        source = { key, id, absolutePath: real, ...(existingMount ? { excludes: toolExcludes(existingMount, path.relative(existingMount.absolutePath, real).split(path.sep).join('/')) } : {}) }; sources.push(source);
+        source = { key, id, absolutePath: real, ...(existingMount ? { excludes: fileExcludes(existingMount, path.relative(existingMount.absolutePath, real).split(path.sep).join('/')) } : {}) }; sources.push(source);
       }
       d.entryPreferences[source.id] = { ...d.entryPreferences[source.id], kind: 'tool', ...(input.title ? { title: input.title } : !d.entryPreferences[source.id]?.title ? { title: existingTitle || defaultToolTitle(real) } : {}) };
       return { id: source.id, alreadyRegistered };
@@ -241,9 +303,9 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     const input = z.object({ absolutePath: z.string().min(1), title: z.string().trim().min(1).max(200).optional() }).parse(req.body);
     const real = await policy.toolLocation(input.absolutePath);
     return changed(d => {
-      const source = d.toolSources?.find(source => source.id === req.params.id);
+      const source = d.fileSources?.find(source => source.id === req.params.id);
       if (!source) throw new AppError('INVALID_TOOL', '工具来源不存在', 404);
-      const duplicate = d.toolSources?.find(other => other.id !== source.id && sameFile(other.absolutePath, real));
+      const duplicate = d.fileSources?.find(other => other.id !== source.id && sameFile(other.absolutePath, real));
       if (duplicate) throw new AppError('TOOL_EXISTS', '此 HTML 已登记，请使用已有工具', 409, { id: duplicate.id });
       source.absolutePath = real;
       source.excludes = [];
@@ -302,9 +364,9 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   preview.get(bridgeScriptPath, async (_req, reply) => reply.type('application/javascript; charset=utf-8').send(htmlBridgeScript(mainOrigin)));
   preview.route<{ Params: { id: string; '*': string } }>({ method: ['GET', 'HEAD'], url: '/t/:id/*', handler: async (req, reply) => {
     const source = sourceByKey(req.params.id);
-    const scope = toolScope(source);
+    const scope = fileScope(source);
     // Validate the entry too: missing/moved entries must not leave an orphan resource scope.
-    await policy.resolve(scope, scope.entry);
+    await policy.resolve(scope, scope.entry, false, 'file');
     let rel = req.params['*'];
     let file = await policy.resolve(scope, rel);
     if (file.stat.isDirectory()) {
@@ -312,7 +374,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
       rel = [rel.replace(/\/$/, ''), 'index.html'].filter(Boolean).join('/');
       file = await policy.resolve(scope, rel);
     }
-    if (!file.stat.isFile()) throw new AppError('INVALID_PATH', '工具资源必须是普通文件', 400);
+    if (!file.stat.isFile()) throw new AppError('INVALID_PATH', '文件资源必须是普通文件', 400);
     const requestedVersion = new URL(req.url, previewOrigin).searchParams.get('fileVersion');
     if (requestedVersion && requestedVersion !== fileVersion(file.stat)) throw new AppError('FILE_CHANGED', '文件已再次更新，请重新加载', 409);
     if (/\.html?$/i.test(file.real)) {
@@ -328,7 +390,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     let m = registry.data.mounts.find(m => m.id === req.params.id && m.enabled);
     if (!m) {
       relative(rel, false);
-      const source = registry.data.toolSources?.find(source => {
+      const source = registry.data.fileSources?.find(source => {
         const ref = parseFileReference(source.id)!;
         const parent = path.posix.dirname(ref.relativePath);
         const prefix = parent === '.' ? '' : `${parent}/`;
@@ -339,7 +401,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
         const ref = parseFileReference(source.id)!;
         const parent = path.posix.dirname(ref.relativePath);
         const prefix = parent === '.' ? '' : `${parent}/`;
-        m = toolScope(source);
+        m = fileScope(source);
         rel = rel === ref.relativePath ? m.entry : rel.slice(prefix.length);
         await policy.resolve(m, m.entry);
       }

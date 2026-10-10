@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from 'react';
-import { fileReference, parseFileReference, previewPath, toolPreviewPath, type Mount, type Snapshot, type TreeItem, type ToolItem } from '../shared/model.js';
+import { fileReference, parseFileReference, previewPath, filePreviewPath, type Mount, type Snapshot, type TreeItem, type ToolItem } from '../shared/model.js';
 import { Management } from './Management.js';
 import { Tree, FileIcon } from './Tree.js';
 import { fullFilePath, treeFileReference } from './fileLocations.js';
@@ -182,7 +182,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   function favorite(id:string){const next=favoritesRef.current.includes(id)?favoritesRef.current.filter(x=>x!==id):[...favoritesRef.current,id];favoritesRef.current=next;setFavorites(next);}
   function finishSearch(cancel=true){if(cancel&&searchRestore.current)setQuery(searchRestore.current.query);setSearchActive(false);restoreFocus(cancel?searchRestore.current?.focus||null:immersionRef.current,immersionRef.current);searchRestore.current=null;}
   function open(id:string,keep=false,pane:PaneId=workspace.active){dispatchPages({type:'open',id:aliasesRef.current[id]||id,keep},pane);if(searchActive)finishSearch(false);if(matchMedia('(max-width: 640px)').matches)setCollapsed(true);}
-  function browserUrl(id:string){const resolved=aliasesRef.current[id]||id;const source=data.toolSources?.find(source=>source.id===resolved);const ref=parseFileReference(resolved);return ref&&previewOrigin?previewOrigin+(source?toolPreviewPath(source):previewPath(ref.mountId,ref.relativePath)):undefined;}
+  function browserUrl(id:string){const resolved=aliasesRef.current[id]||id;const source=data.fileSources?.find(source=>source.id===resolved);const ref=parseFileReference(resolved);return ref&&previewOrigin?previewOrigin+(source?filePreviewPath(source):previewPath(ref.mountId,ref.relativePath)):undefined;}
   function openFile(id:string,keep=false,pane:PaneId=workspace.active){
     const path=parseFileReference(aliasesRef.current[id]||id)?.relativePath||'';
     if(htmlOpening==='browser'&&/\.html?$/i.test(path)){
@@ -330,7 +330,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
           </div>;
         })}{!data.projects.length&&<div className="catalog-empty"><p>挂载目录后，展开文件夹开始浏览。</p><button onClick={()=>setManage('new')}>添加项目</button></div>}</div>
         {view!=='files'&&<>{refs.map(({id,title,ref})=>{
-          const mount=data.mounts.find(m=>m.id===ref?.mountId);const source=data.toolSources?.find(source=>source.id===id);
+          const mount=data.mounts.find(m=>m.id===ref?.mountId);const source=data.fileSources?.find(source=>source.id===id);
           const name=title||source?.absolutePath.split(/[\\/]/).pop()||ref?.relativePath.split('/').pop()||'旧收藏（展开原目录后恢复）';
           const unavailable=!!favoriteErrors[id]||(!source&&!!ref&&(!mount||!mount.enabled));
           return <div className={`file-row ${id===selected?'selected':''}`} key={id}>
@@ -359,7 +359,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
     {showClosedPages && <ClosedPages items={closedPages} open={reopenClosed} close={() => setShowClosedPages(false)}/>}
     {showQuickOpen && <QuickOpen snapshot={data} pages={Object.values(workspace.panes).flatMap(pane => pane.items)} favorites={favorites} tools={tools} open={quickOpenFile} reveal={revealInTree} close={() => setShowQuickOpen(false)}/>}
     {manage&&<Management snapshot={data} project={data.projects.find(p=>p.id===manage)} close={()=>setManage(undefined)} saved={()=>{void reload();setRefresh(v=>v+1);}} removed={()=>{void reload();}}/>}
-    {toolPicker&&<ToolPicker source={typeof toolPicker==='string'?data.toolSources?.find(source=>source.id===toolPicker):undefined} title={typeof toolPicker==='string'?tools.find(tool=>tool.id===toolPicker)?.title:undefined} close={()=>setToolPicker(false)} saved={(id,duplicate)=>{
+    {toolPicker&&<ToolPicker source={typeof toolPicker==='string'?data.fileSources?.find(source=>source.id===toolPicker):undefined} title={typeof toolPicker==='string'?tools.find(tool=>tool.id===toolPicker)?.title:undefined} close={()=>setToolPicker(false)} saved={(id,duplicate)=>{
       void reload();setQuery('');
       if(typeof toolPicker==='string')setUpdateOpen(previous=>{const next={...previous};for(const [paneId,pane] of Object.entries(workspace.panes))if(pane.items.some(page=>page.id===id)){const key=`${paneId}:${id}`;next[key]=(next[key]||0)+1;}return next;});
       if(duplicate){open(id);setError('此 HTML 已添加，已打开已有工具。');}
