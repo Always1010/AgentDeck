@@ -9,8 +9,12 @@ import { hidden, PathPolicy, relative } from './path-policy.js';
 
 export const filterSchema = z.custom<FileTypeFilter>(isFileTypeFilter);
 const recordSchema = z.object({ mountId:z.string(), relativePath:z.string(), version:z.string(), readVersion:z.string(), active:z.boolean(), kind:z.enum(['added','modified']), changedAt:z.number(), sequence:z.number() });
-const stateSchema = z.object({ schemaVersion:z.literal(1), filter:filterSchema, sequence:z.number().int().nonnegative(), mounts:z.record(z.string(),z.object({mount:mountSchema,filter:filterSchema})), records:z.record(z.string(),recordSchema) });
+const baselineSchema = z.object({mount:mountSchema,filter:filterSchema});
+const mountStateSchema = baselineSchema.extend({scopes:z.array(z.object({scope:z.string(),baseline:baselineSchema.optional()})).optional()});
+const stateSchema = z.object({ schemaVersion:z.literal(1), filter:filterSchema, sequence:z.number().int().nonnegative(), mounts:z.record(z.string(),mountStateSchema), records:z.record(z.string(),recordSchema) });
 type State = z.infer<typeof stateSchema>;
+type Baseline = z.infer<typeof baselineSchema>;
+type MountState = State['mounts'][string];
 const under = (name:string, root:string) => !root || name===root || name.startsWith(`${root}/`);
 const missing = (e:unknown) => ['ENOENT','ENOTDIR'].includes((e as NodeJS.ErrnoException).code || '');
 const watchEventLimit=1024;
@@ -117,8 +121,28 @@ export class FileUpdates {
     if(record.active){record.active=false;this.dirty=true;}
     this.unread.delete(id);
   }
-  private rememberMount(mount:Mount){
-    const value={mount:structuredClone(mount),filter:structuredClone(this.state.filter)};
+  private baselineAt(previous:MountState|undefined,rel:string):Baseline|undefined{
+    let baseline:Baseline|undefined=previous?{mount:previous.mount,filter:previous.filter}:undefined,depth=-1;
+    for(const region of previous?.scopes||[])if(under(rel,region.scope)&&region.scope.length>depth){baseline=region.baseline;depth=region.scope.length;}
+    return baseline;
+  }
+  private rememberMount(mount:Mount,scope='',failed:string[]=[],previous=this.state.mounts[mount.id]){
+    const current:Baseline={mount:structuredClone(mount),filter:structuredClone(this.state.filter)};
+    const base=scope&&previous?{mount:previous.mount,filter:previous.filter}:current;
+    // A region records the visibility at its last successful scan. An absent
+    // baseline means its first scan is still pending, including after restart.
+    const regions:NonNullable<MountState['scopes']>=scope?(previous?.scopes||[]).filter(r=>!under(r.scope,scope)):[];
+    if(scope){if(!previous)regions.push({scope:''});if(!failed.includes(scope))regions.push({scope,baseline:current});}
+    for(const rel of failed){
+      regions.push({scope:rel,baseline:this.baselineAt(previous,rel)});
+      regions.push(...(previous?.scopes||[]).filter(r=>r.scope!==rel&&under(r.scope,rel)));
+    }
+    const scopes:NonNullable<MountState['scopes']>=[];
+    for(const region of regions.sort((a,b)=>a.scope.length-b.scope.length)){
+      const inherited=this.baselineAt({...base,scopes},region.scope);
+      if(JSON.stringify(region.baseline)!==JSON.stringify(inherited))scopes.push(region);
+    }
+    const value={...base,...(scopes.length?{scopes}: {})};
     if(JSON.stringify(this.state.mounts[mount.id])!==JSON.stringify(value)){this.state.mounts[mount.id]=value;this.dirty=true;}
   }
   private dropWatchers(mountId:string,scope='',cancelRecovery=false){
@@ -182,7 +206,7 @@ export class FileUpdates {
       this.debounce=undefined;const pending=this.pending;this.pending=new Map();
       void this.enqueue(async()=>{
         for(const [id,paths] of pending){const m=this.mounts().find(m=>m.id===id&&m.enabled);if(!m||this.state.mounts[id]?.mount.absolutePath!==m.absolutePath)continue;
-          for(const rel of paths)await this.scan(m,rel,()=>false);
+          for(const rel of paths)await this.scan(m,rel);
         }
       }).catch(()=>{});
     },650);
@@ -198,7 +222,7 @@ export class FileUpdates {
     if(old)this.updateUnread(id,this.state.records[id]);else this.indexRecord(id,this.state.records[id]);
     this.dirty=true;
   }
-  private async scan(m:Mount,scope:string,baseline:(rel:string)=>boolean):Promise<boolean>{
+  private async scan(m:Mount,scope:string,previous:MountState|undefined=this.state.mounts[m.id]):Promise<void>{
     const seen=new Set<string>(),directories=new Set<string>(),failed:string[]=[];
     const visit=async(rel:string):Promise<void>=>{
       if(this.closed)return;
@@ -214,7 +238,9 @@ export class FileUpdates {
             await visit(child);
           }
         }else if(fileTypeVisible(path.posix.basename(rel),this.state.filter)){
-          seen.add(fileReference(m.id,rel));this.observe(m,rel,fileVersion(item.stat),baseline(rel));
+          const baseline=this.baselineAt(previous,rel);
+          const silent=!baseline||baseline.mount.absolutePath!==m.absolutePath||!baseline.mount.enabled||hidden(rel,baseline.mount.excludes)||!fileTypeVisible(path.posix.basename(rel),baseline.filter);
+          seen.add(fileReference(m.id,rel));this.observe(m,rel,fileVersion(item.stat),silent);
         }
       }catch(e){
         const code=(e as {code?:string}).code;
@@ -223,7 +249,7 @@ export class FileUpdates {
       }
     };
     await visit(scope);
-    if(this.closed)return false;
+    if(this.closed)return;
     // A successful parent enumeration may no longer contain a formerly watched
     // child, so visiting only existing entries is insufficient to retire it.
     for(const w of this.watchers.values()){
@@ -234,7 +260,7 @@ export class FileUpdates {
       if(hidden(r.relativePath,m.excludes)||!fileTypeVisible(path.posix.basename(r.relativePath),this.state.filter)){this.deactivate(id,r);continue;}
       if(!seen.has(id))this.removeRecord(id);
     }
-    return failed.length===0;
+    this.rememberMount(m,scope,failed,previous);
   }
   private async sync(){
     if(!this.initialized)return;
@@ -250,12 +276,11 @@ export class FileUpdates {
       if(this.closed)return;
       const previous=this.state.mounts[m.id];
       const moved=previous&&previous.mount.absolutePath!==m.absolutePath;
-      if(moved){this.dropWatchers(m.id,'',true);for(const [id] of this.scopedRecords(m.id))this.removeRecord(id);}
+      if(moved){this.dropWatchers(m.id,'',true);for(const [id] of this.scopedRecords(m.id))this.removeRecord(id);delete this.state.mounts[m.id];this.dirty=true;}
       if(!m.enabled){this.dropWatchers(m.id,'',true);for(const [id,r] of this.scopedRecords(m.id))this.deactivate(id,r);this.rememberMount(m);continue;}
       for(const w of [...this.watchers.values(),...this.recovering.values()])if(w.mountId===m.id&&hidden(w.rel,m.excludes))this.dropWatchers(m.id,w.rel,true);
       this.errors.delete(m.id);
-      const baseline=(rel:string)=>!previous||!!moved||!previous.mount.enabled||hidden(rel,previous.mount.excludes)||!fileTypeVisible(path.posix.basename(rel),previous.filter);
-      if(await this.scan(m,'',baseline))this.rememberMount(m);
+      await this.scan(m,'',moved?undefined:previous);
     }
   }
   async acknowledge(input:{id?:string;version?:string;through?:number}){
@@ -266,7 +291,7 @@ export class FileUpdates {
         const match=/^file:([^:]+):(.+)$/.exec(input.id);
         const m=match&&this.mounts().find(m=>m.id===match[1]&&m.enabled);
         if(m&&match&&!hidden(match[2],m.excludes)&&fileTypeVisible(path.posix.basename(match[2]),this.state.filter)){
-          relative(match[2],false);await this.scan(m,match[2],()=>!this.state.mounts[m.id]);
+          relative(match[2],false);await this.scan(m,match[2]);
         }
       }
       const records=input.id!==undefined?(this.state.records[input.id]?[[input.id,this.state.records[input.id]] as const]:[]):Object.entries(this.state.records);
