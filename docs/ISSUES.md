@@ -417,3 +417,13 @@
 - 解决方案：使用实际 GFM Markdown AST 统一生成标题标签与唯一锚点，全部级别参与去重后再过滤目录；正文使用同一批已赋锚点节点，保留 GFM 与折叠章节。
 - 验证方式：类型检查、4 项 Markdown 单测、隔离构建及一项浏览器目录导航回归通过；覆盖下划线、实体、转义、图片替代文本、跨级重复、代码块忽略、GFM 表格/任务/删除线，以及定位时展开对应折叠章节。
 - 相关文件：app/web/Markdown.tsx、tests/markdown.test.ts、tests/e2e/markdown-anchors.spec.ts、package.json、package-lock.json。
+
+## AD-034 — Windows 路径规范化遗漏 UNC 和设备路径写法
+
+- 日期：2026-10-10
+- 状态：已解决
+- 现象：斜杠或混合分隔符的 UNC/设备路径可能绕过原始反斜杠前缀检查，导致文件系统读取触及预期之外的位置。
+- 原因分析：只有少数原始前缀与规范化后的冒号检查；没有在任何文件系统访问前统一确认显式本机驱动器根。原始 ADS 片段还可能被后续 `..` 规范化消除。
+- 解决方案：统一 localAbsolute 验证原始拼写，拒绝 UNC、设备、ADS、空字节及隐式驱动器路径；挂载、独立文件、链接检查与目录选择器复用该入口，realpath 后再次核对。
+- 验证方式：安全、工具、独立文件与目录读取 24 项定向单测及类型检查通过。14 种危险路径均在 lstat/realpath/stat/access/readdir 之前拒绝且注册表不变；本机驱动器根仍可浏览，临时目录模拟主目录的文件仍可打开。不连接真实 UNC，不写用户主目录。
+- 相关文件：app/server/path-policy.ts、app/server/server.ts、tests/security.test.ts、docs/BACKEND.md。

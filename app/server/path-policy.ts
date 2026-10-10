@@ -6,6 +6,15 @@ import type { Mount } from '../shared/model.js';
 
 export const mime: Record<string, string> = { '.html':'text/html; charset=utf-8', '.htm':'text/html; charset=utf-8', '.css':'text/css; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.mjs':'text/javascript; charset=utf-8', '.json':'application/json; charset=utf-8', '.csv':'text/plain; charset=utf-8', '.txt':'text/plain; charset=utf-8', '.md':'text/plain; charset=utf-8', '.markdown':'text/plain; charset=utf-8', '.svg':'image/svg+xml', '.png':'image/png', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.gif':'image/gif', '.webp':'image/webp', '.ico':'image/x-icon', '.woff':'font/woff', '.woff2':'font/woff2', '.ttf':'font/ttf', '.otf':'font/otf', '.wasm':'application/wasm', '.pdf':'application/pdf', '.mp4':'video/mp4', '.mp3':'audio/mpeg' };
 export const inside = (root: string, target: string) => { const rel = path.relative(root, target); return rel === '' || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel)); };
+/** Validate the original spelling before normalization can hide a remote/device path or ADS. */
+export function localAbsolute(value: string) {
+  const normalized = typeof value === 'string' ? value.replace(/\\/g, '/') : '';
+  if (!normalized || normalized.startsWith('//') || normalized.includes('\0') || !path.isAbsolute(value) ||
+    (process.platform === 'win32' && (!/^[a-z]:\//i.test(normalized) || normalized.slice(2).includes(':')))) {
+    throw new AppError('INVALID_PATH', '请填写本机磁盘绝对路径，不支持 UNC、设备路径或备用数据流');
+  }
+  return path.resolve(value);
+}
 export function relative(value: string, allowEmpty = true) {
   if (typeof value !== 'string' || (!value && !allowEmpty) || value.includes('\\') || value.includes(':') || value.includes('\0') || value.startsWith('/') || value.split('/').some(s => s === '..' || s === '.' || /[. ]$/.test(s))) throw new AppError('INVALID_PATH', '需要安全的相对路径，不能越界');
   return value.replace(/\/$/, '');
@@ -21,6 +30,7 @@ export class PathPolicy {
     return selected ? [] : mount.excludes;
   }
   async noLinks(target: string) {
+    target = localAbsolute(target);
     const parsed = path.parse(target); let cursor = parsed.root;
     for (const part of target.slice(parsed.root.length).split(path.sep).filter(Boolean)) {
       cursor = path.join(cursor, part);
@@ -29,12 +39,9 @@ export class PathPolicy {
   }
   /** A selected file is allowed in home/root directories without publishing them as mounts. */
   async fileLocation(value: string, directory = false) {
-    if (!path.isAbsolute(value) || value.startsWith('\\\\') || value.includes('\0')) throw new AppError('INVALID_PATH', '请填写本机磁盘绝对路径，暂不支持 UNC');
-    const target = path.resolve(value);
-    // Reject Windows device paths and alternate data streams, including on every read.
-    if (process.platform === 'win32' && target.slice(path.parse(target).root.length).includes(':')) throw new AppError('INVALID_PATH', '不支持设备路径或备用数据流');
+    const target = localAbsolute(value);
     await this.noLinks(target);
-    const real = await fs.realpath(target);
+    const real = localAbsolute(await fs.realpath(target));
     const sensitive = process.platform === 'win32' ? [process.env.SystemRoot || 'C:\\Windows', process.env.ProgramFiles || 'C:\\Program Files', process.env.ProgramData || 'C:\\ProgramData'] : ['/etc','/proc','/sys','/dev','/boot'];
     const segments = real.slice(path.parse(real).root.length).split(path.sep).join('/');
     if (sensitive.some(p => inside(p, real)) || inside(this.stateDir, real) || hidden(segments)) throw new AppError('FORBIDDEN_PATH', '系统、隐藏敏感目录及平台状态文件不能打开', 403);
@@ -50,10 +57,9 @@ export class PathPolicy {
   }
   private sourceRoot(mount: Mount) { return mount.fileSource ? this.fileLocation(mount.absolutePath, true) : this.root(mount.absolutePath); }
   async root(value: string) {
-    if (!path.isAbsolute(value) || value.startsWith('\\\\')) throw new AppError('INVALID_PATH', '请填写本机磁盘绝对目录，暂不支持 UNC');
-    const target = path.resolve(value);
+    const target = localAbsolute(value);
     await this.noLinks(target);
-    const real = await fs.realpath(target);
+    const real = localAbsolute(await fs.realpath(target));
     if (!(await fs.stat(real)).isDirectory()) throw new AppError('INVALID_PATH', '所选路径不是目录');
     const sensitive = process.platform === 'win32' ? [process.env.SystemRoot || 'C:\\Windows', process.env.ProgramFiles || 'C:\\Program Files', process.env.ProgramData || 'C:\\ProgramData'] : ['/etc','/proc','/sys','/dev','/boot'];
     const segments=real.slice(path.parse(real).root.length).split(path.sep).join('/');
@@ -91,7 +97,7 @@ export class PathPolicy {
     const target = path.resolve(root, rel);
     if (!inside(root, target) || inside(this.stateDir, target)) throw new AppError('FORBIDDEN_PATH', '文件超出可访问范围', 403);
     await this.noLinks(target);
-    const real = await fs.realpath(target);
+    const real = localAbsolute(await fs.realpath(target));
     if (!inside(root, real) || inside(this.stateDir, real)) throw new AppError('FORBIDDEN_PATH', '真实路径超出可访问范围', 403);
     const realRelative = path.relative(root,real).split(path.sep).join('/');
     if(hidden(realRelative,this.excludes(mount,realRelative),internalPackage))throw new AppError('FORBIDDEN_FILE','真实路径在排除范围内',403);
