@@ -3,6 +3,7 @@ import { parseFileReference, type Snapshot } from '../shared/model.js';
 import { Icon } from './Icon.js';
 import type { OpenPage } from './pages.js';
 import type { PaneId } from './workspace.js';
+import { fullFilePath } from './fileLocations.js';
 
 export function pageLabel(page: OpenPage, pages: OpenPage[], snapshot: Snapshot) {
   const ref = parseFileReference(page.id);
@@ -11,8 +12,9 @@ export function pageLabel(page: OpenPage, pages: OpenPage[], snapshot: Snapshot)
   const project = snapshot.projects.find(p => p.id === mount?.projectId);
   const directory = ref?.relativePath.split('/').slice(0, -1).join('/');
   const duplicate = pages.some(p => p.id !== page.id && (p.title || parseFileReference(p.id)?.relativePath.split('/').pop() || '旧文件') === name);
-  const context = [project?.name, mount?.label, directory].filter(Boolean).join(' / ');
-  const path = mount && ref ? `${mount.absolutePath.replace(/[\\/]$/, '')}/${ref.relativePath}` : ref?.relativePath || page.id;
+  const source = snapshot.toolSources?.find(source => source.id === page.id);
+  const context = source ? source.absolutePath.split(/[\\/]/).slice(0,-1).join('/') : [project?.name, mount?.label, directory].filter(Boolean).join(' / ');
+  const path = fullFilePath(snapshot, page.id) || ref?.relativePath || page.id;
   return { name, display: duplicate ? `${name} · ${context || ref?.mountId || page.id}` : name, path };
 }
 

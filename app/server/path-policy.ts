@@ -91,7 +91,8 @@ export class PathPolicy {
       const sensitive = process.platform === 'win32' ? [process.env.SystemRoot || 'C:\\Windows', process.env.ProgramFiles || 'C:\\Program Files', process.env.ProgramData || 'C:\\ProgramData'] : ['/etc','/proc','/sys','/dev','/boot'];
       if (hidden(segments) || sensitive.some(p => inside(p, real))) throw new AppError('FORBIDDEN_PATH', '资源位于受限制的目录', 403);
       // A tool at a broad root may load static assets, but cannot publish unrelated documents.
-      if (rel && rel !== mount.entry && !/\.(css|[cm]?js|json|csv|svg|png|jpe?g|gif|webp|ico|woff2?|ttf|otf|wasm|mp4|mp3)$/i.test(rel)) throw new AppError('UNSUPPORTED_FILE', '工具仅提供所选 HTML 与静态资源；资源需位于 HTML 同目录或子目录', 403);
+      const broadRoot = root === path.parse(root).root || path.relative(os.homedir(), root) === '';
+      if (broadRoot && rel && rel !== mount.entry && !/\.(css|[cm]?js|json|csv|svg|png|jpe?g|gif|webp|ico|woff2?|ttf|otf|wasm|mp4|mp3)$/i.test(rel)) throw new AppError('UNSUPPORTED_FILE', '盘符根目录或用户主目录中的工具仅提供所选 HTML 与静态资源', 403);
     }
     const stat = await fs.stat(real);
     if (!stat.isDirectory() && !stat.isFile()) throw new AppError('UNSUPPORTED_FILE', '仅支持普通文件和目录', 403);

@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { parseFileReference, type Snapshot } from '../shared/model.js';
 import { Dialog } from './Dialog.js';
 import { Icon } from './Icon.js';
+import { fullFilePath } from './fileLocations.js';
 import './help.css';
 
 const sections = [
@@ -32,12 +33,12 @@ function PromptTemplates({ snapshot, selected }: { snapshot: Snapshot; selected:
   const mount = mounts.find(m => m.id === mountId);
   const project = snapshot.projects.find(p => p.id === mount?.projectId);
   const root = mount?.absolutePath || '【填写实际输出目录的绝对路径】';
-  const current = mount && reference?.mountId === mount.id ? joinPath(root, reference.relativePath) : '【填写需要处理的文件绝对路径】';
+  const current = snapshot.toolSources?.some(source => source.id === selected) ? fullFilePath(snapshot, selected)! : mount && reference?.mountId === mount.id ? joinPath(root, reference.relativePath) : '【填写需要处理的文件绝对路径】';
   const context = `我使用 AgentDeck 浏览本地成果。${project ? `项目名称：${project.name}。` : ''}
 成果目录：${root}
 请先确认你能访问这个目录；不能访问时，说明需要我提供哪些文件或如何转移成果。`;
   const delivery = `交付：列出真实文件路径、打开的 HTML 入口、必要的构建命令和实际验证结果；未验证的部分请明确说明。
-我会在 AgentDeck 中展开目录、打开入口并验收。无需修改 AgentDeck 的源码、路由或首页清单。`;
+我会在 AgentDeck 中打开入口并验收；HTML 工具可以直接按绝对路径加入工具列表，无需挂载目录。无需修改 AgentDeck 的源码、路由或首页清单。`;
   const prompts: Record<Scenario, string> = {
     report: `${context}
 
@@ -128,7 +129,7 @@ export function Help({ snapshot, selected, close, shortcuts }: { snapshot: Snaps
         </>}
         {section === 'workflow' && <>
           <span className="eyebrow">02 / 日常工作流</span><h2>减少找文件，把时间留给判断</h2><p className="help-lead">按任务组织目录，用收藏直达成果，用工具入口复用稳定的小应用。</p>
-          <div className="help-cards"><section><h3>文件 · 保留完整上下文</h3><p>按主题建立项目。一个项目可以追加多个目录；需要了解资料来龙去脉时，从真实文件树进入。</p></section><section><h3>收藏 · 直达常读内容</h3><p>点击文件旁或预览顶部的星标。收藏可直接打开，不必每次展开多层目录。</p></section><section><h3>工具 · 复用常用能力</h3><p>在 HTML 预览的“更多设置”中加入工具，或切到“工具”后点击＋。移除工具只取消分类。</p></section></div>
+          <div className="help-cards"><section><h3>文件 · 保留完整上下文</h3><p>按主题建立项目。一个项目可以追加多个目录；需要了解资料来龙去脉时，从真实文件树进入。</p></section><section><h3>收藏 · 直达常读内容</h3><p>点击文件旁或预览顶部的星标。收藏可直接打开，不必每次展开多层目录。</p></section><section><h3>工具 · 复用常用能力</h3><p>切到“工具”后点击＋，直接选择本机 HTML 或粘贴绝对路径，无需项目或挂载。也可以从 HTML 预览的“更多设置”中加入工具。文件移动后，用工具旁的文件夹按钮重新选择；移除工具保留原文件。</p></section></div>
           <h3>快速找到文件与真实路径</h3><p>顶部“快速打开”先查已打开、收藏和工具。需要找尚未展开目录中的文件时，选择一个挂载范围，可填写相对目录，再点击“搜索目录”。它只查文件名和路径，包含子目录，不读正文；可继续搜索或取消，最多显示 1000 个结果。侧栏筛选仍只查已加载文件，两者互不改变。</p><p>快速打开中的“定位”，以及当前文件“更多 → 在文件树中定位”，会按需展开文件所在目录。需要给 Agent 提供文件位置时，使用“更多 → 复制完整路径”。收藏和工具列表可见时才批量核对文件是否可用，收起或隐藏后暂停检查。</p>
           <h3>同时保留几份报告</h3><p>斜体标题表示未固定标签。打开尚未打开的文件只替换当前未固定标签；当前标签已固定时新建标签，后台标签保留。目标文件已在本区打开时直接切换。按 P 可固定或取消固定当前标签；也可双击文件列表中的文件、双击顶部标签，或右键标签选择“保留标签页”来固定，标题恢复正体。点击标签或左侧“已打开页面”切回时，阅读位置和工具输入会保留。</p><p>单区时，“已打开页面”直接显示该区标签；分屏后按阅读区列出全部标签，各区可单独折叠。组标题标出当前操作区，圆点表示各区正在显示的页面。点击其他区的页面会激活并显示对应区域；最大化时会先恢复分屏。列表里的关闭按钮只关闭它所属区域的标签。</p><p>已打开列表整体可折叠；W 或标签上的 × 关闭当前文件，包括固定标签，并切回最近使用的剩余页面。预览工具栏的刷新只影响当前页。固定标签和星标收藏互不替代，工具的未保存数据仍需按工具提供的方式保存或导出。</p>
           <h3>选择适合阅读的主题</h3><p>顶部主题默认跟随系统，也可以固定为浅色或深色。选择会在当前浏览器中保存，切换不会刷新已打开的报告。工作台、Markdown、文本、帮助和弹窗会一起切换；HTML 报告自身的配色由报告决定，旧报告可能仍是白底。</p>

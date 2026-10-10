@@ -15,5 +15,32 @@ test('add an HTML tool from preview; favorites remain independent and iframe inp
  await page.getByRole('button',{name:'收藏',exact:true}).click();await expect(page.getByRole('treeitem',{name:'merge.html',exact:true})).toBeVisible();expect(await fs.readFile(path.join(root,'merge.html'),'utf8')).toContain('报表合并');
 });
 test('tool list plus selects only HTML and persists a custom name',async({page})=>{
- await page.getByRole('button',{name:'工具',exact:true}).click();await page.getByRole('button',{name:'添加工具',exact:true}).click();const dialog=page.getByRole('dialog',{name:'添加工具',exact:true});await expect(dialog.getByText('notes.md',{exact:false})).toHaveCount(0);await dialog.getByRole('button',{name:'◇ merge.html',exact:true}).click();await dialog.getByLabel('工具名称').fill('报表合并');await dialog.getByRole('button',{name:'添加工具',exact:true}).click();await expect(dialog).toHaveCount(0);await page.getByRole('treeitem',{name:'报表合并',exact:true}).click();await expect(page.frameLocator('iframe').locator('p')).toHaveText('报表合并');await page.reload();await page.getByRole('button',{name:'工具',exact:true}).click();await expect(page.getByRole('treeitem',{name:'报表合并',exact:true})).toBeVisible();await page.screenshot({path:'test-results/tools-list.png'});
+ const snapshot=await json(page,'/api/projects');for(const project of snapshot.projects)await json(page,`/api/projects/${project.id}`,'DELETE');
+ await page.getByRole('button',{name:'工具',exact:true}).click();await page.getByRole('button',{name:'添加工具',exact:true}).click();
+ const dialog=page.getByRole('dialog',{name:'添加工具',exact:true});await expect(dialog.locator('select')).toHaveCount(0);
+ await page.emulateMedia({colorScheme:'dark'});await expect(page.locator('html')).toHaveAttribute('data-theme','dark');
+ await page.screenshot({path:'test-results/tools-add.png'});
+ await dialog.getByRole('button',{name:'选择 HTML 文件',exact:true}).click();const picker=page.getByRole('dialog',{name:'选择本机 HTML 文件'});
+ await picker.getByLabel('当前位置').fill(root);await picker.getByRole('button',{name:'前往此路径'}).click();
+ await expect(picker.getByText('notes.md',{exact:true})).toHaveCount(0);await picker.getByRole('button',{name:'选择文件：merge.html',exact:true}).click();await page.screenshot({path:'test-results/tools-picker.png'});await picker.getByRole('button',{name:'选择文件',exact:true}).click();
+ await expect(dialog.getByLabel('HTML 文件',{exact:true})).toHaveValue(await fs.realpath(path.join(root,'merge.html')));await expect(dialog.getByLabel('工具名称')).toHaveValue('merge');
+ await dialog.getByLabel('工具名称').fill('报表合并');await dialog.getByRole('button',{name:'添加工具',exact:true}).click();await expect(dialog).toHaveCount(0);
+ await page.getByRole('treeitem',{name:'报表合并',exact:true}).click();await expect(page.frameLocator('iframe').locator('p')).toHaveText('报表合并');
+ await page.reload();await page.getByRole('button',{name:'工具',exact:true}).click();await expect(page.getByRole('treeitem',{name:'报表合并',exact:true})).toBeVisible();
+ expect((await json(page,'/api/projects')).mounts).toEqual([]);await page.screenshot({path:'test-results/tools-list.png'});
+});
+
+test('pasted paths deduplicate without replacing a custom title and moved files can be selected again',async({page})=>{
+ const standalone=path.join(root,'独立 工具');await fs.mkdir(standalone,{recursive:true});
+ const file=path.join(standalone,'index.htm'),moved=path.join(standalone,'moved.htm');await fs.writeFile(file,'<input id="draft"><p>独立页面</p>');
+ await page.getByRole('button',{name:'工具',exact:true}).click();await page.getByRole('button',{name:'添加工具',exact:true}).click();
+ let dialog=page.getByRole('dialog',{name:'添加工具',exact:true});await dialog.getByLabel('HTML 文件',{exact:true}).fill(file);await expect(dialog.getByLabel('工具名称')).toHaveValue('独立 工具');await dialog.getByLabel('工具名称').fill('自定义工具');await dialog.getByRole('button',{name:'添加工具',exact:true}).click();await expect(dialog).toHaveCount(0);
+ const registered=(await json(page,'/api/tools')).find((tool:{title:string})=>tool.title==='自定义工具');
+ await page.getByRole('button',{name:'添加工具',exact:true}).click();dialog=page.getByRole('dialog',{name:'添加工具',exact:true});await dialog.getByLabel('HTML 文件',{exact:true}).fill(`"${file}"`);await dialog.getByRole('button',{name:'添加工具',exact:true}).click();await expect(dialog).toHaveCount(0);
+ await expect(page.getByRole('treeitem',{name:'自定义工具',exact:true})).toHaveCount(1);await expect(page.frameLocator('iframe').locator('p')).toHaveText('独立页面');
+ await fs.rename(file,moved);await page.reload();await page.getByRole('button',{name:'工具',exact:true}).click();
+ await expect(page.getByRole('treeitem',{name:/^自定义工具/}).getByText('不可用',{exact:true})).toBeVisible();await page.getByRole('button',{name:'重新选择文件：自定义工具',exact:true}).click();
+ const repair=page.getByRole('dialog',{name:'重新选择工具文件',exact:true});await repair.getByLabel('HTML 文件',{exact:true}).fill(moved);await repair.getByRole('button',{name:'保存路径'}).click();await expect(repair).toHaveCount(0);
+ await page.getByRole('treeitem',{name:'自定义工具',exact:true}).click();await expect(page.frameLocator('iframe').locator('p')).toHaveText('独立页面');
+ expect((await json(page,'/api/tools')).find((tool:{title:string})=>tool.title==='自定义工具').id).toBe(registered.id);
 });

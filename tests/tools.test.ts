@@ -36,6 +36,8 @@ test('known legacy tool entries are restored without scanning and explicit remov
   await fs.writeFile(path.join(temp,'state','legacy-file-references.json'),JSON.stringify({[old]:id,[legacyId(mountId,'readme.md')]:fileReference(mountId,'readme.md')}));
   const readdir=vi.spyOn(fs,'readdir');app=await createWorkbench({stateDir:path.join(temp,'state'),port:4310,previewPort:4311});
   expect((await app.main.inject({url:'/api/tools',headers})).json()).toEqual([{id,title:'旧工具'}]);expect(readdir).not.toHaveBeenCalled();
+  await app.main.inject({method:'DELETE',url:`/api/projects/${app.registry.data.projects[0].id}`,headers,payload:{}});
+  expect((await app.main.inject({url:`/api/entries/${encodeURIComponent(id)}`,headers})).statusCode).toBe(200);
   await app.main.inject({method:'DELETE',url:`/api/tools/${encodeURIComponent(id)}`,headers,payload:{}});
   await app.close();app=await createWorkbench({stateDir:path.join(temp,'state'),port:4310,previewPort:4311});
   expect((await app.main.inject({url:'/api/tools',headers})).json()).toEqual([]);
@@ -47,6 +49,7 @@ test('absolute HTML registration works without mounts and serves bounded origina
   await fs.writeFile(html, '<link rel="stylesheet" href="assets/app.css"><input>');
   await fs.mkdir(path.join(temp, 'assets')); await fs.writeFile(path.join(temp, 'assets', 'app.css'), 'body{color:red}');
   await fs.writeFile(path.join(temp, 'secret.key'), 'private');
+  await fs.writeFile(path.join(temp, 'payload.exe'), 'private');
   const register = () => app.main.inject({method:'PUT',url:'/api/tools',headers,payload:{absolutePath:html,title:'独立工具'}});
   const first = (await register()).json(); const second = (await register()).json();
   expect(first.alreadyRegistered).toBe(false); expect(second).toEqual({id:first.id,alreadyRegistered:true});
@@ -57,9 +60,11 @@ test('absolute HTML registration works without mounts and serves bounded origina
   const previewHeaders = {host:'127.0.0.1:4311'};
   expect((await app.preview.inject({url,headers:previewHeaders})).body).toContain('<input>');
   expect((await app.preview.inject({url:base+'assets/app.css',headers:previewHeaders})).body).toBe('body{color:red}');
-  for (const resource of ['%2e%2e%2foutside.css','%5c..%5coutside.css','secret.key','state/registry.json','project/readme.md']) {
+  for (const resource of ['%2e%2e%2foutside.css','%5c..%5coutside.css','secret.key','state/registry.json','payload.exe']) {
     expect((await app.preview.inject({url:base+resource,headers:previewHeaders})).statusCode).toBeGreaterThanOrEqual(400);
   }
+  await fs.mkdir(path.join(temp,'help'));await fs.writeFile(path.join(temp,'help','index.html'),'<p>帮助页</p>');
+  expect((await app.preview.inject({url:base+'help/',headers:previewHeaders})).body).toContain('帮助页');
   expect((await app.main.inject({url:`/api/mounts/${e.mountId}/tree`,headers})).statusCode).toBe(404);
   expect((await app.main.inject({url:`/api/mounts/${e.mountId}/file?path=${encodeURIComponent(e.relativePath)}`,headers})).body).toContain('<input>');
   expect((await app.main.inject({url:`/api/mounts/${e.mountId}/resource-version?path=${encodeURIComponent(e.relativePath)}`,headers})).statusCode).toBe(200);
@@ -80,6 +85,11 @@ test('mounted tools keep their ID and survive project removal; relocated tools k
   const e = (await app.main.inject({url:`/api/entries/${encodeURIComponent(id)}`,headers})).json();
   expect(e.title).toBe('原名称'); expect(new URL(e.previewUrl).pathname).toContain('renamed.htm');
   expect((await app.preview.inject({url:new URL(e.previewUrl).pathname,headers:{host:'127.0.0.1:4311'}})).statusCode).toBe(200);
+  const other = path.join(temp,'other.html'); await fs.writeFile(other,'<p>other</p>');
+  await app.main.inject({method:'PUT',url:'/api/tools',headers,payload:{absolutePath:other}});
+  expect((await app.main.inject({method:'PATCH',url:`/api/tools/${encodeURIComponent(id)}`,headers,payload:{absolutePath:other}})).statusCode).toBe(409);
+  const otherId = app.registry.data.toolSources!.find(source => source.absolutePath.endsWith('other.html'))!.id;
+  await app.main.inject({method:'DELETE',url:`/api/tools/${encodeURIComponent(otherId)}`,headers,payload:{}});
   await app.main.inject({method:'DELETE',url:`/api/tools/${encodeURIComponent(id)}`,headers,payload:{}});
   expect((await app.main.inject({url:'/api/tools',headers})).json()).toEqual([]);
   expect((await app.main.inject({url:`/api/entries/${encodeURIComponent(id)}`,headers})).statusCode).toBe(200);
@@ -97,4 +107,11 @@ test('HTML selection checks actual file types, sources, junctions and broad dire
   expect(listing.items.map((item:{name:string})=>item.name)).toEqual(['merge.html']);
   await expect(app.policy.toolLocation(os.homedir(),true)).resolves.toBeTruthy();
   await expect(app.policy.toolLocation(path.parse(root).root,true)).resolves.toBeTruthy();
+  await fs.writeFile(path.join(root,'private.css'),'private');
+  await app.main.inject({method:'PATCH',url:`/api/mounts/${mountId}`,headers,payload:{excludes:[process.platform==='win32'?'MERGE.HTML':'merge.html','private.css']}});
+  const registered = await app.main.inject({method:'PUT',url:'/api/tools',headers,payload:{absolutePath:path.join(root,'merge.html')}});
+  expect(registered.statusCode).toBe(200);
+  const e = (await app.main.inject({url:`/api/entries/${encodeURIComponent(registered.json().id)}`,headers})).json();
+  expect(e.previewUrl).toBeTruthy();
+  expect((await app.preview.inject({url:new URL(e.previewUrl).pathname.replace(/merge\.html$/, 'private.css'),headers:{host:'127.0.0.1:4311'}})).statusCode).toBe(403);
 });

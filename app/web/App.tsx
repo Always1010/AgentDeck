@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from 'react';
-import { fileReference, parseFileReference, previewPath, type Mount, type Snapshot, type TreeItem, type ToolItem } from '../shared/model.js';
+import { fileReference, parseFileReference, previewPath, toolPreviewPath, type Mount, type Snapshot, type TreeItem, type ToolItem } from '../shared/model.js';
 import { Management } from './Management.js';
 import { Tree, FileIcon } from './Tree.js';
-import { fullFilePath } from './fileLocations.js';
+import { fullFilePath, treeFileReference } from './fileLocations.js';
 import { ToolPicker } from './ToolPicker.js';
 import { Icon } from './Icon.js';
 import { Viewer } from './Viewer.js';
@@ -107,7 +107,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   const aliasesRef=useRef(aliases);aliasesRef.current=aliases;
   const [view,setView]=useState<'files'|'favorites'|'tools'>(session?.snapshot?.view.view||'files');
   const [tools,setTools]=useState<ToolItem[]>([]);
-  const [toolPicker,setToolPicker]=useState(false);
+  const [toolPicker,setToolPicker]=useState<boolean | string>(false);
   const [query,setQuery]=useState(session?.snapshot?.view.query||'');
   const [revealFile, setRevealFile] = useState<{ mountId: string; path: string; sequence: number }>();
   const revealSequence = useRef(0);
@@ -177,11 +177,12 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
     if(updated.some((id,i)=>id!==favoritesRef.current[i])||updated.length!==favoritesRef.current.length){favoritesRef.current=updated;setFavorites(updated);}
     if(changed)dispatchPages({type:'aliases',aliases:next});
   }
-  async function changeTool(id:string,remove:boolean){try{await api(remove?`/api/tools/${encodeURIComponent(id)}`:'/api/tools',remove?'DELETE':'PUT',remove?undefined:{id});await reload();}catch(e){setError((e as Error).message);}}
+  function registeredTool(id:string){const file=fullFilePath(data,id);const normalized=(value:string)=>/^[a-z]:/i.test(value)?value.replace(/\\/g,'/').toLowerCase():value;return tools.find(tool=>tool.id===id||!!file&&!!fullFilePath(data,tool.id)&&normalized(fullFilePath(data,tool.id)!)===normalized(file));}
+  async function changeTool(id:string,remove:boolean){const target=remove?registeredTool(id)?.id||id:id;try{await api(remove?`/api/tools/${encodeURIComponent(target)}`:'/api/tools',remove?'DELETE':'PUT',remove?undefined:{id});await reload();}catch(e){setError((e as Error).message);}}
   function favorite(id:string){const next=favoritesRef.current.includes(id)?favoritesRef.current.filter(x=>x!==id):[...favoritesRef.current,id];favoritesRef.current=next;setFavorites(next);}
   function finishSearch(cancel=true){if(cancel&&searchRestore.current)setQuery(searchRestore.current.query);setSearchActive(false);restoreFocus(cancel?searchRestore.current?.focus||null:immersionRef.current,immersionRef.current);searchRestore.current=null;}
   function open(id:string,keep=false,pane:PaneId=workspace.active){dispatchPages({type:'open',id:aliasesRef.current[id]||id,keep},pane);if(searchActive)finishSearch(false);if(matchMedia('(max-width: 640px)').matches)setCollapsed(true);}
-  function browserUrl(id:string){const ref=parseFileReference(aliasesRef.current[id]||id);return ref&&previewOrigin?previewOrigin+previewPath(ref.mountId,ref.relativePath):undefined;}
+  function browserUrl(id:string){const resolved=aliasesRef.current[id]||id;const source=data.toolSources?.find(source=>source.id===resolved);const ref=parseFileReference(resolved);return ref&&previewOrigin?previewOrigin+(source?toolPreviewPath(source):previewPath(ref.mountId,ref.relativePath)):undefined;}
   function openFile(id:string,keep=false,pane:PaneId=workspace.active){
     const path=parseFileReference(aliasesRef.current[id]||id)?.relativePath||'';
     if(htmlOpening==='browser'&&/\.html?$/i.test(path)){
@@ -198,8 +199,8 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   }
   function keepPage(id:string,pane:PaneId=workspace.active){dispatchPages({type:'keep',id:aliasesRef.current[id]||id},pane);}
   function revealInTree(id: string) {
-    const reference = parseFileReference(aliasesRef.current[id] || id);
-    if (!reference || !data.mounts.some(mount => mount.id === reference.mountId)) { setError('文件所属挂载已不可用。'); return; }
+    const reference = treeFileReference(data, aliasesRef.current[id] || id);
+    if (!reference) { setError('此文件尚未挂载到文件树。可复制完整路径，或在工具列表重新选择文件。'); return; }
     setImmersive(false); setCollapsed(false); setView('files'); setQuery(''); setSearchActive(false);
     setRevealFile({ mountId: reference.mountId, path: reference.relativePath, sequence: ++revealSequence.current });
   }
@@ -293,7 +294,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   }document.addEventListener('keydown',keydown);return()=>document.removeEventListener('keydown',keydown);},[selected,immersive,collapsed,query,searchActive,shortcutsEnabled,navigationEnabled,workspace,closeEmpty,confirmPaneClose]);
   function resize(value:number){setWidth(Math.max(200,Math.min(440,value)));}
   const hidden=!searchActive&&(immersive||collapsed);
-  const refs=(view==='tools'?tools:favorites.map(id=>({id,title:''}))).map(({id,title})=>({id,title,ref:parseFileReference(id)})).filter(({id,title,ref})=>`${title} ${ref?.relativePath||id} ${data.mounts.find(m=>m.id===ref?.mountId)?.label||''}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const refs=(view==='tools'?tools:favorites.map(id=>({id,title:''}))).map(({id,title})=>({id,title,ref:parseFileReference(id)})).filter(({id,title,ref})=>`${title} ${fullFilePath(data,id)||ref?.relativePath||id} ${data.mounts.find(m=>m.id===ref?.mountId)?.label||''}`.toLowerCase().includes(query.trim().toLowerCase()));
   return <><div inert={settingsPage||closingPane!==null} className={`shell ${hidden?'sidebar-hidden':''} ${immersive?'immersive':''}`} style={{'--sidebar-width':`${width}px`} as CSSProperties}>
     <header className="workspace-header"><button ref={sidebarRef} className="sidebar-toggle" aria-keyshortcuts={shortcutsEnabled?'b':undefined} title={`${hidden?'展开文件侧栏':'收起文件侧栏'}${shortcutsEnabled?' · B（工作台获得焦点时）':''}`} aria-label={hidden?'展开文件侧栏':'收起文件侧栏'} aria-expanded={!hidden} onClick={toggleSidebar}><Icon name="sidebar"/>{shortcutsEnabled&&<kbd aria-hidden="true">B</kbd>}</button><strong className="brand">AgentDeck</strong><span className="workspace-context">本地文件工作台</span><div className="workspace-actions">
       <div className="workspace-reading-actions">
@@ -329,8 +330,15 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
           </div>;
         })}{!data.projects.length&&<div className="catalog-empty"><p>挂载目录后，展开文件夹开始浏览。</p><button onClick={()=>setManage('new')}>添加项目</button></div>}</div>
         {view!=='files'&&<>{refs.map(({id,title,ref})=>{
-          const mount=data.mounts.find(m=>m.id===ref?.mountId);const name=title||ref?.relativePath.split('/').pop()||'旧收藏（展开原目录后恢复）';
-          return <div className={`file-row ${id===selected?'selected':''}`} key={id}><button className="node-main" role="treeitem" aria-selected={id===selected} title={ref?`${mount?.label||'挂载不可用'} / ${ref.relativePath}${favoriteErrors[id]?' · '+favoriteErrors[id]:''}`:id} onClick={event=>{if(event.detail<=1)openFile(id);}} onDoubleClick={()=>openFile(id,true)}>{view==='tools'?<Icon name="tool"/>:<FileIcon name={name}/>}<span className="filename">{name}</span>{ref&&(!mount||!mount.enabled||favoriteErrors[id])&&<span className="node-status">不可用</span>}</button>{/\.html?$/i.test(ref?.relativePath||'')&&<FileOpenMenu name={name} url={browserUrl(id)} internal={()=>open(id)} other={()=>openOther(id)}/>}<button className={`row-action ${view==='tools'?'':'starred'}`} aria-label={`${view==='tools'?'移除工具':'取消收藏'}：${name}`} title={view==='tools'?'从工具列表移除，原文件保留':'取消收藏'} onClick={()=>view==='tools'?void changeTool(id,true):favorite(id)}>{view==='tools'?<Icon name="close"/>:'★'}</button></div>;
+          const mount=data.mounts.find(m=>m.id===ref?.mountId);const source=data.toolSources?.find(source=>source.id===id);
+          const name=title||source?.absolutePath.split(/[\\/]/).pop()||ref?.relativePath.split('/').pop()||'旧收藏（展开原目录后恢复）';
+          const unavailable=!!favoriteErrors[id]||(!source&&!!ref&&(!mount||!mount.enabled));
+          return <div className={`file-row ${id===selected?'selected':''}`} key={id}>
+            <button className="node-main" role="treeitem" aria-selected={id===selected} title={`${fullFilePath(data,id)||id}${favoriteErrors[id]?' · '+favoriteErrors[id]:''}`} onClick={event=>{if(event.detail<=1)openFile(id);}} onDoubleClick={()=>openFile(id,true)}>{view==='tools'?<Icon name="tool"/>:<FileIcon name={name}/>}<span className="filename">{name}</span>{unavailable&&<span className="node-status">不可用</span>}</button>
+            {/\.html?$/i.test(ref?.relativePath||'')&&<FileOpenMenu name={name} url={browserUrl(id)} internal={()=>open(id)} other={()=>openOther(id)}/>}
+            {view==='tools'&&source&&<button className="row-action" aria-label={`重新选择文件：${name}`} title="重新选择 HTML 文件" onClick={()=>setToolPicker(id)}><Icon name="folder"/></button>}
+            <button className={`row-action ${view==='tools'?'':'starred'}`} aria-label={`${view==='tools'?'移除工具':'取消收藏'}：${name}`} title={view==='tools'?'从工具列表移除，原文件保留':'取消收藏'} onClick={()=>view==='tools'?void changeTool(id,true):favorite(id)}>{view==='tools'?<Icon name="close"/>:'★'}</button>
+          </div>;
         })}{!refs.length&&<p className="tree-message">{query?'没有匹配的文件':view==='tools'?'点击上方＋添加 HTML，或在预览的更多菜单中加入工具。':'点击文件旁的星标，收藏常用文件。'}</p>}</>}
       </div><div className="explorer-footer">{view==='tools'?'常用 HTML 工具 · 原文件只读':view==='favorites'?'常用文件收藏':fileTypeFilter.mode!=='all'?`${fileTypeFilter.mode==='allow'?'白名单':'黑名单'} · ${fileTypeFilter.extensions.length} 种类型${query?' · 名称筛选中':''}`:query?'仅筛选已加载的目录和文件':'按需展开 · 原文件只读'}</div>
     </aside>
@@ -341,7 +349,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
         return <section key={paneId} tabIndex={-1} style={style} className={`reading-pane ${workspace.active===paneId?'active-pane':''}`} data-pane={paneId} aria-label={`阅读区 ${paneId+1}`} hidden={!visible} inert={!visible} onPointerDownCapture={()=>activatePane(paneId)} onFocusCapture={()=>activatePane(paneId)}>
           <div className="pane-navigation"><span>阅读区 {paneId+1}</span><button aria-label="后退" title="上一个文件 · Alt＋←" disabled={history.index<=0} onClick={()=>dispatchWorkspace({type:'history',pane:paneId,direction:-1})}>←</button><button aria-label="前进" title="下一个文件 · Alt＋→" disabled={history.index>=history.entries.length-1} onClick={()=>dispatchWorkspace({type:'history',pane:paneId,direction:1})}>→</button><button className="pane-close" aria-label={`关闭阅读区 ${paneId+1}`} title="关闭阅读区 · Q" aria-keyshortcuts={shortcutsEnabled?'q':undefined} onClick={()=>requestClosePane(paneId)}><Icon name="close"/></button></div>
           {!!pane.items.length&&<PageTabs scope={scope} pages={pane.items} active={pane.active} snapshot={data} open={id=>open(id,false,paneId)} keep={id=>keepPage(id,paneId)} close={id=>closePreview(id,paneId)}/>}
-          {pane.items.length?pane.items.map(page=><Viewer fullPath={fullFilePath(data, page.id)} reveal={() => revealInTree(page.id)} reloadRequest={updateOpen[`${paneId}:${page.id}`]||0} acknowledge={updates.acknowledge} documentFontSize={documentFontSize} keyboardActive={workspace.active===paneId} immersive={immersive} bridgeConfig={{mode:htmlKeys,singles:shortcutsEnabled,navigation:navigationEnabled,escape:immersive||searchActive||workspace.maximized!==null,active:!settingsPage&&!help&&!guide&&!manage&&!toolPicker&&!showQuickOpen&&!showClosedPages&&closingPane===null}} bridgeAction={action=>runAction(action,paneId)} focused={()=>activatePane(paneId)} initialScroll={positions.current.get(`${paneId}:${page.id}`)} positionChanged={position=>positionChanged(`${paneId}:${page.id}`,position)} scope={scope} key={page.id} id={page.id} active={visible&&page.id===pane.active} titleChanged={title=>dispatchPages({type:'title',id:page.id,title},paneId)} tool={tools.some(t=>t.id===page.id)} toggleTool={()=>void changeTool(page.id,tools.some(t=>t.id===page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} navigate={(mountId,path)=>{activatePane(paneId);openFile(fileReference(mountId,path),false,paneId);}} other={()=>openOther(page.id)}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>{Object.keys(workspace.panes).length===1?'打开报告，专注阅读。':'选择文件，开始对照。'}</h2><p>点击此阅读区，再从侧栏选择文件。双击文件保留标签。</p>{Object.keys(workspace.panes).length===1&&updates.snapshot.total>0&&<div className="empty-updates"><strong>更新未读 · {updates.snapshot.total}</strong>{updates.snapshot.items.slice(0,5).map(item=><button key={item.id} title={item.relativePath} onClick={()=>openUpdate(item)}>{item.kind==='added'?'新增':'更新'} · {item.relativePath}</button>)}</div>}{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button onClick={()=>{activatePane(paneId);setImmersive(false);setCollapsed(false);}}>选择文件</button><button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
+          {pane.items.length?pane.items.map(page=><Viewer fullPath={fullFilePath(data, page.id)} reveal={treeFileReference(data,page.id)?() => revealInTree(page.id):undefined} reloadRequest={updateOpen[`${paneId}:${page.id}`]||0} acknowledge={updates.acknowledge} documentFontSize={documentFontSize} keyboardActive={workspace.active===paneId} immersive={immersive} bridgeConfig={{mode:htmlKeys,singles:shortcutsEnabled,navigation:navigationEnabled,escape:immersive||searchActive||workspace.maximized!==null,active:!settingsPage&&!help&&!guide&&!manage&&!toolPicker&&!showQuickOpen&&!showClosedPages&&closingPane===null}} bridgeAction={action=>runAction(action,paneId)} focused={()=>activatePane(paneId)} initialScroll={positions.current.get(`${paneId}:${page.id}`)} positionChanged={position=>positionChanged(`${paneId}:${page.id}`,position)} scope={scope} key={page.id} id={page.id} active={visible&&page.id===pane.active} titleChanged={title=>dispatchPages({type:'title',id:page.id,title},paneId)} tool={!!registeredTool(page.id)} toggleTool={()=>void changeTool(page.id,!!registeredTool(page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} navigate={(mountId,path)=>{activatePane(paneId);openFile(fileReference(mountId,path),false,paneId);}} other={()=>openOther(page.id)}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>{Object.keys(workspace.panes).length===1?'打开报告，专注阅读。':'选择文件，开始对照。'}</h2><p>点击此阅读区，再从侧栏选择文件。双击文件保留标签。</p>{Object.keys(workspace.panes).length===1&&updates.snapshot.total>0&&<div className="empty-updates"><strong>更新未读 · {updates.snapshot.total}</strong>{updates.snapshot.items.slice(0,5).map(item=><button key={item.id} title={item.relativePath} onClick={()=>openUpdate(item)}>{item.kind==='added'?'新增':'更新'} · {item.relativePath}</button>)}</div>}{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button onClick={()=>{activatePane(paneId);setImmersive(false);setCollapsed(false);}}>选择文件</button><button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
         </section>;
       }}
     </ReadingLayout>
@@ -351,7 +359,11 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
     {showClosedPages && <ClosedPages items={closedPages} open={reopenClosed} close={() => setShowClosedPages(false)}/>}
     {showQuickOpen && <QuickOpen snapshot={data} pages={Object.values(workspace.panes).flatMap(pane => pane.items)} favorites={favorites} tools={tools} open={quickOpenFile} reveal={revealInTree} close={() => setShowQuickOpen(false)}/>}
     {manage&&<Management snapshot={data} project={data.projects.find(p=>p.id===manage)} close={()=>setManage(undefined)} saved={()=>{void reload();setRefresh(v=>v+1);}} removed={()=>{void reload();}}/>}
-    {toolPicker&&<ToolPicker snapshot={data} close={()=>setToolPicker(false)} saved={()=>void reload()}/>}
+    {toolPicker&&<ToolPicker source={typeof toolPicker==='string'?data.toolSources?.find(source=>source.id===toolPicker):undefined} title={typeof toolPicker==='string'?tools.find(tool=>tool.id===toolPicker)?.title:undefined} close={()=>setToolPicker(false)} saved={(id,duplicate)=>{
+      void reload();setQuery('');
+      if(typeof toolPicker==='string')setUpdateOpen(previous=>{const next={...previous};for(const [paneId,pane] of Object.entries(workspace.panes))if(pane.items.some(page=>page.id===id)){const key=`${paneId}:${id}`;next[key]=(next[key]||0)+1;}return next;});
+      if(duplicate){open(id);setError('此 HTML 已添加，已打开已有工具。');}
+    }}/>}
     {guide&&<Help snapshot={data} selected={selected} close={()=>setGuide(false)} shortcuts={()=>setHelp(true)}/>}
     {help&&<ShortcutHelp close={()=>setHelp(false)} enabled={shortcutsEnabled} setEnabled={setShortcutsEnabled}/>}
   </div>{closingPane!==null&&<Dialog label="关闭阅读区" close={cancelPaneClose}><header><h2>关闭阅读区</h2><button aria-label="取消关闭阅读区" onClick={cancelPaneClose}>×</button></header><p>阅读区 {closingPane+1} 中有 {workspace.panes[closingPane]?.items.length||0} 个标签页，确定关闭整个阅读区吗？</p><footer><button onClick={cancelPaneClose}>取消</button><button className="primary" data-autofocus onClick={()=>closeReadingPane(closingPane)}>确定关闭</button></footer></Dialog>}{settingsPage&&<Settings currentSession={session?.id} flushSession={flush} close={closeSettings} htmlOpening={htmlOpening} setHtmlOpening={setHtmlOpening} singles={shortcutsEnabled} setSingles={setShortcutsEnabled} navigation={navigationEnabled} setNavigation={setNavigationEnabled} htmlKeys={htmlKeys} setHtmlKeys={setHtmlKeys} closeEmpty={closeEmpty} setCloseEmpty={setCloseEmpty} confirmPaneClose={confirmPaneClose} setConfirmPaneClose={setConfirmPaneClose} documentFontSize={documentFontSize} setDocumentFontSize={setDocumentFontSize}/>}</>;
