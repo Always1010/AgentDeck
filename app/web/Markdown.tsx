@@ -1,12 +1,14 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkParse from 'remark-parse';
+import { unified } from 'unified';
 import type { Entry } from '../shared/model.js';
 import { previewPath } from '../shared/model.js';
 import { isEditing } from './shortcuts.js';
 
 export type MarkdownHeading = { level: number; label: string; id: string };
-type MarkdownNode = { type: string; depth?: number; children?: MarkdownNode[]; data?: { hName?: string; hProperties?: Record<string, unknown> } };
+type MarkdownNode = { type: string; depth?: number; value?: string; alt?: string; children?: MarkdownNode[]; data?: { hName?: string; hProperties?: Record<string, unknown> } };
 
 function sectionNode(heading: MarkdownNode, body: MarkdownNode[], level: number): MarkdownNode {
   return {
@@ -42,66 +44,42 @@ export function remarkCollapsibleSections() {
   };
 }
 
-function plain(node: ReactNode): string {
-  return typeof node === 'string' || typeof node === 'number'
-    ? String(node)
-    : Array.isArray(node)
-      ? node.map(plain).join('')
-      : node && typeof node === 'object' && 'props' in node
-        ? plain((node.props as { children?: ReactNode }).children)
-        : '';
-}
-
-function headingLabel(value: string) {
-  return value
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/<[^>]*>/g, '')
-    .replace(/[`*_~]/g, '')
-    .replace(/\\([\\`*_[\]{}()#+.!~-])/g, '$1')
-    .trim();
+function headingLabel(node: MarkdownNode): string {
+  if (node.type === 'text' || node.type === 'inlineCode') return node.value || '';
+  if (node.type === 'image' || node.type === 'imageReference') return node.alt || '';
+  if (node.type === 'break') return '\n';
+  return node.children?.map(headingLabel).join('') || '';
 }
 
 function headingSlug(value: string) {
   return value.toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').trim().replace(/\s+/g, '-') || 'section';
 }
 
-export function extractMarkdownHeadings(text: string, maximumLevel = 3): MarkdownHeading[] {
-  const headings: Array<{ level: number; label: string }> = [];
-  const lines = text.replace(/\r\n?/g, '\n').split('\n');
-  let fence: { marker: string; length: number } | undefined;
-  for (let index = 0; index < lines.length; index++) {
-    const line = lines[index];
-    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
-    if (fenceMatch) {
-      const marker = fenceMatch[1][0];
-      if (!fence) fence = { marker, length: fenceMatch[1].length };
-      else if (marker === fence.marker && fenceMatch[1].length >= fence.length) fence = undefined;
-      continue;
+const markdownParser = unified().use(remarkParse).use(remarkGfm).freeze();
+
+function parseMarkdown(text: string, prefix = '', maximumLevel = 3) {
+  const tree = markdownParser.parse(text) as MarkdownNode;
+  const headings: MarkdownHeading[] = [];
+  const used = new Set<string>();
+  function visit(node: MarkdownNode) {
+    if (node.type === 'heading') {
+      const label = headingLabel(node).trim();
+      const base = headingSlug(label);
+      let id = base, count = 1;
+      while (used.has(id)) id = `${base}-${++count}`;
+      used.add(id);
+      node.data = { ...node.data, hProperties: { ...node.data?.hProperties, id: prefix + id } };
+      // Every rendered heading consumes its anchor, including levels omitted from the TOC.
+      if ((node.depth || 7) <= maximumLevel) headings.push({ level: node.depth!, label, id });
     }
-    if (fence) continue;
-    const atx = line.match(/^\s{0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/);
-    if (atx) {
-      const level = atx[1].length;
-      if (level <= maximumLevel) headings.push({ level, label: headingLabel(atx[2]) });
-      continue;
-    }
-    if (index + 1 < lines.length && line.trim()) {
-      const setext = lines[index + 1].match(/^\s{0,3}(=+|-+)\s*$/);
-      if (setext) {
-        const level = setext[1][0] === '=' ? 1 : 2;
-        if (level <= maximumLevel) headings.push({ level, label: headingLabel(line.trim()) });
-        index++;
-      }
-    }
+    node.children?.forEach(visit);
   }
-  const used = new Map<string, number>();
-  return headings.map(heading => {
-    const base = headingSlug(heading.label);
-    const count = (used.get(base) || 0) + 1;
-    used.set(base, count);
-    return { ...heading, id: count === 1 ? base : `${base}-${count}` };
-  });
+  visit(tree);
+  return { tree, headings };
+}
+
+export function extractMarkdownHeadings(text: string, maximumLevel = 3): MarkdownHeading[] {
+  return parseMarkdown(text, '', maximumLevel).headings;
 }
 
 function MarkdownToc({ headings, prefix, open, setOpen, sections, setSections }: { headings: MarkdownHeading[]; prefix: string; open: boolean; setOpen: (open: boolean) => void; sections: boolean; setSections: (open: boolean) => void }) {
@@ -157,7 +135,10 @@ function MarkdownToc({ headings, prefix, open, setOpen, sections, setSections }:
 export function Markdown({ text, entry, previewOrigin, navigate, keyboardActive = false, shortcutsEnabled = true }: { text: string; entry: Entry; previewOrigin: string; navigate: (path: string) => void; keyboardActive?: boolean; shortcutsEnabled?: boolean }) {
   const article = useRef<HTMLElement>(null);
   const prefixId = useId();
-  const headings = useMemo(() => extractMarkdownHeadings(text), [text]);
+  const parsed = useMemo(() => parseMarkdown(text, prefixId), [text, prefixId]);
+  const headings = parsed.headings;
+  // The directory and the body consume the same parsed nodes and assigned anchors.
+  const preparedMarkdown = useMemo(() => () => (tree: MarkdownNode) => { tree.children = parsed.tree.children; }, [parsed]);
   const hasSections = headings.some(heading => heading.level === 2) || headings.filter(heading => heading.level === 1).length > 1;
   const [tocOpen, setTocOpen] = useState(true);
   const beforePrint = useRef<boolean[] | undefined>(undefined);
@@ -220,17 +201,9 @@ export function Markdown({ text, entry, previewOrigin, navigate, keyboardActive 
       return result.href;
     } catch { return ''; }
   }
-  const headingCounts = new Map<string, number>();
-  const heading = (Tag: 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6') => ({ children }: { children?: ReactNode }) => {
-    const baseId = headingSlug(plain(children));
-    const count = (headingCounts.get(baseId) || 0) + 1;
-    headingCounts.set(baseId, count);
-    return <Tag id={prefixId + (count === 1 ? baseId : `${baseId}-${count}`)}>{children}</Tag>;
-  };
   return <div className="markdown-shell">
     {headings.length > 0 && <MarkdownToc headings={headings} prefix={prefixId} open={tocOpen} setOpen={setTocOpen} sections={hasSections} setSections={setSections} />}
-    <article ref={article} className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm, remarkCollapsibleSections]} skipHtml urlTransform={url} components={{
-      h1: heading('h1'), h2: heading('h2'), h3: heading('h3'), h4: heading('h4'), h5: heading('h5'), h6: heading('h6'),
+    <article ref={article} className="markdown"><ReactMarkdown remarkPlugins={[preparedMarkdown, remarkCollapsibleSections]} skipHtml urlTransform={url} components={{
       a: ({ href, children }) => {
         if (href?.startsWith('#')) return <a href={href} onClick={event => {
           event.preventDefault();
