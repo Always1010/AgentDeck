@@ -9,7 +9,7 @@
 | 服务 | 默认地址 | 职责 |
 | --- | --- | --- |
 | 主服务 | `http://127.0.0.1:4310` | 提供工作台静态页面、项目和挂载管理、文件树与文本读取、下载、工具登记、SSE 状态通知。 |
-| 预览服务 | `http://127.0.0.1:4311` | 在受限边界内提供已挂载目录的 HTML 与静态资源，并为 HTML 临时注入工作台桥接脚本。 |
+| 预览服务 | `http://127.0.0.1:4311` | 在受限边界内提供挂载内容或独立工具的 HTML 与静态资源，并为 HTML 临时注入工作台桥接脚本。 |
 
 启动入口为 `app/server/main.ts`。可通过 `--state-dir`、`--port` 和 `--preview-port` 调整状态目录与端口；默认状态文件为：
 
@@ -24,7 +24,7 @@
 2. **安全的目录访问**：对每次目录、文件、下载和预览请求都验证挂载状态、相对路径、真实路径与排除规则；禁止符号链接/junction、UNC 路径、敏感目录、隐藏文件及密钥等。
 3. **文件浏览与阅读支撑**：按需列出单层目录、批量检查文件状态、按用户选择的范围搜索文件名和路径、读取受支持的文本文件与提供下载，并生成稳定的文件引用与预览地址。
 4. **HTML 报告/工具预览**：维持相对资源路径；在响应过程中注入桥接脚本，不写回源 HTML。桥接脚本用于 iframe 内的焦点、滚动和工作台快捷键协调。
-5. **工具分类**：将指定 HTML 文件登记为“工具”，也支持单工具挂载、历史登记和每个工具根目录的入口覆盖；工具分类本身不递归扫描挂载目录。
+5. **工具登记**：支持按本机 HTML 绝对路径独立登记，也保留预览中分类、单工具挂载、历史登记与入口覆盖。已知旧工具启动时补充独立来源记录，保留 ID 和名称；不扫描目录发现工具。独立工具目录不加入项目文件树、目录搜索或全局未读扫描。
 6. **配置可靠性**：配置变更串行执行，写入临时文件后替换 `registry.json`，并保留 `.bak`。注册表损坏时服务报错停止，不以空配置覆盖原文件。
 
 ## 2. 通用约定
@@ -41,8 +41,10 @@
 
 - `:id` 为项目或挂载 ID 时，使用 UUID。
 - 文件 ID 使用可逆格式 `file:<mountId>:<relativePath>`；放进 URL 路径时需进行 URL 编码。例如：`file:8b...:reports/index.html`。
+- 独立工具来源保存 `{ key, id, absolutePath, excludes? }`。`key` 是预览资源范围的 UUID；`id` 继续采用文件引用格式，位于已有挂载中的首次登记优先复用原文件 ID，否则使用独立 UUID。重新选择文件只更新 `absolutePath`，不会改动 ID；工具当前真实路径以来源记录为准，不能仅根据 ID 推导。
 - `relativePath`、`path`、`entry`、`toolRoot` 使用 `/` 分隔的相对路径，不允许空路径（部分目录接口除外）、`..`、`.`、反斜杠、盘符、空字节或 Windows 末尾点/空格。
 - 目录挂载仅允许本机磁盘的绝对路径，不支持 UNC；不能是盘符根目录、用户主目录、系统敏感目录、状态目录及其祖先/子孙，且不跟随 symlink/junction。
+- 单个工具入口允许位于用户主目录、盘符根目录或状态目录的祖先目录；仍拒绝系统敏感目录、状态文件、隐藏敏感路径、UNC、设备路径、备用数据流和链接。资源范围是入口所在目录，每次访问核对入口、资源及真实路径，不允许越界。位于盘符根目录或用户主目录的工具只开放所选 HTML 和 CSS、JS/MJS、JSON/CSV、图片、字体、WASM、音视频等静态资源。
 
 ### 通用错误格式
 
@@ -66,6 +68,7 @@
 | `Project` | `id`、`name`、`order` |
 | `Mount` | `id`、`projectId`、`label`、`absolutePath`、`mode`、`toolDirectories`、`excludes`、`entry`、`enabled` |
 | `Entry` | `id`、`projectId`、`mountId`、`title`、`kind`、`format`、`relativePath`、`resourceRoot`、`updatedAt`、`fileVersion`、`refreshMode`、`status`、`previewUrl`；是否能够预览仍取决于文件类型。 |
+| `ToolSource` | `key`、`id`、`absolutePath`、可选 `excludes`；仅用于已明确登记的工具来源，不是目录挂载。 |
 
 `mode` 仅为 `content`、`tool-library`、`single-tool`；`kind` 仅为 `html`、`tool`、`markdown`、`text`、`data`。新建挂载的默认值是 `mode: "content"`、`entry: "index.html"`、`toolDirectories: []`、`excludes: []`、`enabled: true`。
 
@@ -87,7 +90,7 @@
 
 | 方法与路径 | 请求体或参数 | 作用与响应 |
 | --- | --- | --- |
-| `GET /api/projects` | — | 返回 `{ projects, mounts, revision }`。项目按 `order` 排序；每个挂载额外带 `status: online \| offline \| disabled`，离线时带 `error`。 |
+| `GET /api/projects` | — | 返回 `{ projects, mounts, revision, toolSources }`。项目按 `order` 排序；每个挂载额外带 `status: online \| offline \| disabled`，离线时带 `error`；独立工具来源不混入 `mounts`。 |
 | `POST /api/projects` | `{ name, order?, mount? }`；可选 `mount` 为下文挂载创建字段。 | 新建项目，可同时新建一个挂载；返回新 `Project`。未传 `order` 时使用当前项目数量。 |
 | `PATCH /api/projects/:id` | `{ name?, order? }` | 更新项目名称或排序；返回更新后的 `Project`。 |
 | `DELETE /api/projects/:id` | — | 移除项目及其挂载、工具入口覆盖；不删除任何实际目录或文件。返回 `{ ok: true }`。 |
@@ -104,8 +107,9 @@
 | --- | --- | --- |
 | `GET /api/fs/locations` | — | 返回目录选择器的起始位置：`{ locations: [home, cwd, ...可访问盘符] }`。 |
 | `GET /api/fs/directories` | `?absolutePath=<本机绝对路径>` | 返回该目录的直接、非隐藏、非符号链接子目录：`{ current, parent, directories: [{ name, path }] }`。 |
+| `GET /api/fs/html-files` | `?absolutePath=<本机绝对目录>` | 返回该目录可访问的直接子目录和 HTML 文件：`{ current, parent, items: [{ name, absolutePath, directory }] }`；无需已有挂载，目录在前，过滤敏感位置和链接。 |
 
-该组接口只辅助选择挂载目录，不会创建目录，也不会返回文件列表。
+该组接口辅助选择挂载目录或 HTML 工具，不创建目录、不上传或复制文件。HTML 选择器只读当前一层，不递归扫描磁盘；前端忽略已取消或较早的读取结果，初始目录读取不会覆盖用户正在输入的位置。
 
 ### 文件与目录
 
@@ -129,15 +133,18 @@
 
 前端收藏/工具列表可见时使用批量状态接口，收起或隐藏后停止检查。阅读现场、组合与个人备份保存在浏览器中；个人备份不通过这些后端接口读写挂载配置或源文件。
 
+对已登记工具的入口，元信息、状态、文本、下载和资源指纹接口优先解析独立来源；即使原挂载停用或移除，入口仍可读取。`/api/mounts/:id/file`、`download` 和 `resource-version` 可以使用工具 ID 中的标识与相对路径访问该入口，不因此开放该标识下的目录树或搜索。
+
 ### 工具分类
 
 | 方法与路径 | 请求体或参数 | 作用与响应 |
 | --- | --- | --- |
 | `GET /api/tools` | — | 返回工具列表 `[{ id, title }]`。来源包括显式登记、单工具挂载、入口覆盖和可恢复的历史登记。 |
-| `PUT /api/tools` | `{ id, title? }` | 将一个存在的 HTML 条目登记为工具；`title` 长度为 1–200（可选）。返回 `{ id }`。 |
+| `PUT /api/tools` | `{ absolutePath, title? }` 或 `{ id, title? }`；两种位置字段必须恰选其一。 | 校验现存普通 HTML，按规范化真实路径去重并保存独立来源；`title` 长度为 1–200（可选）。返回 `{ id, alreadyRegistered }`，重复添加复用已有 ID。 |
+| `PATCH /api/tools/:id` | `{ absolutePath, title? }` | 重新选择工具文件，保留 ID；与另一来源路径重复返回 `409 TOOL_EXISTS`。原目录资源排除设置清空，按新入口目录检查。返回 `{ id }`。 |
 | `DELETE /api/tools/:id` | `:id` 为文件引用。 | 取消工具分类，实际文件保留。返回 `{ ok: true }`。 |
 
-工具列表只根据登记数据和历史映射恢复，不会为发现工具而扫描文件系统。显式移除会覆盖旧版工具登记。
+工具来源保存在注册表可选的 `toolSources` 字段中，旧状态文件仍可加载。入口在已有挂载内时保留适用于相邻资源的排除项；直接选择的入口自身不受文件树排除项限制。已知旧登记的迁移保留 ID、名称和资源排除项。工具列表不扫描文件系统；显式移除覆盖旧版分类，但来源记录保留供已有收藏、阅读现场及再次添加使用。删除项目不会删除独立来源或源文件。独立工具通过可见列表状态检查与已打开页面轮询报告离线、缺失和更新。
 
 ## 4. 预览服务 API
 
@@ -147,13 +154,14 @@
 | --- | --- |
 | `GET /__agentdeck/bridge.js` | 返回运行时注入到 HTML 文档中的工作台桥接脚本。 |
 | `GET` 或 `HEAD /m/:id/*` | 在挂载 `:id` 中读取资源；目录请求会补充尾随 `/` 并加载其 `index.html`。 |
+| `GET` 或 `HEAD /t/:key/*` | 在独立工具入口目录内读取 HTML 和资源；入口本身也必须通过检查，支持目录 `index.html`，不列出目录内容。 |
 
 预览支持 HTML、CSS、JS、JSON、CSV、图片、字体、PDF、音视频等已列入 MIME 白名单的类型。未知类型不提供预览。若资源是 HTML，服务会在响应流中注入 `<script src="/__agentdeck/bridge.js"></script>`：
 
 - 不改写源文件，下载和源码读取保持原始内容；
 - 保留原编码，并只检查最多 64 KiB 的文档前缀来确定安全插入点；
 - `HEAD` 只返回头部，不传输正文；
-- 预览地址由文件元信息中的 `previewUrl` 提供，格式为 `http://127.0.0.1:<预览端口>/m/<mountId>/<相对路径>`。
+- 预览地址由文件元信息中的 `previewUrl` 提供。普通挂载文件使用 `/m/<mountId>/<相对路径>`；已登记工具使用 `/t/<key>/<HTML 文件名>`，相邻资源按这个目录地址解析。原挂载移除或停用时，已打开的旧 `/m` 工具地址也可在对应工具来源范围内继续读取入口和资源，保持当前 iframe 实例。
 
 ## 5. 安全与运行限制
 
