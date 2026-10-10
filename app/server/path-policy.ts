@@ -23,6 +23,24 @@ export class PathPolicy {
       if ((await fs.lstat(cursor)).isSymbolicLink()) throw new AppError('FORBIDDEN_PATH', '默认不跟随符号链接或 junction', 403);
     }
   }
+  /** A selected file is allowed in home/root directories without publishing them as mounts. */
+  async toolLocation(value: string, directory = false) {
+    if (!path.isAbsolute(value) || value.startsWith('\\\\') || value.includes('\0')) throw new AppError('INVALID_PATH', '请填写本机磁盘绝对路径，暂不支持 UNC');
+    const target = path.resolve(value);
+    // Reject Windows device paths and alternate data streams, including on every read.
+    if (process.platform === 'win32' && target.slice(path.parse(target).root.length).includes(':')) throw new AppError('INVALID_PATH', '不支持设备路径或备用数据流');
+    await this.noLinks(target);
+    const real = await fs.realpath(target);
+    const sensitive = process.platform === 'win32' ? [process.env.SystemRoot || 'C:\\Windows', process.env.ProgramFiles || 'C:\\Program Files', process.env.ProgramData || 'C:\\ProgramData'] : ['/etc','/proc','/sys','/dev','/boot'];
+    const segments = real.slice(path.parse(real).root.length).split(path.sep).join('/');
+    if (sensitive.some(p => inside(p, real)) || inside(this.stateDir, real) || hidden(segments)) throw new AppError('FORBIDDEN_PATH', '系统、隐藏敏感目录及平台状态文件不能作为工具或资源', 403);
+    const stat = await fs.stat(real);
+    if (directory ? !stat.isDirectory() : !stat.isFile()) throw new AppError('INVALID_PATH', directory ? '请选择目录' : '请选择普通 HTML 文件');
+    if (!directory && !/\.html?$/i.test(real)) throw new AppError('INVALID_TOOL', '请选择 HTML 网页作为工具', 400);
+    await fs.access(real, fs.constants.R_OK);
+    return real;
+  }
+  private sourceRoot(mount: Mount) { return mount.toolSource ? this.toolLocation(mount.absolutePath, true) : this.root(mount.absolutePath); }
   async root(value: string) {
     if (!path.isAbsolute(value) || value.startsWith('\\\\')) throw new AppError('INVALID_PATH', '请填写本机磁盘绝对目录，暂不支持 UNC');
     const target = path.resolve(value);
@@ -40,7 +58,7 @@ export class PathPolicy {
     relative(rel);
     if (hidden(rel, mount.excludes, internalPackage)) throw new AppError('FORBIDDEN_FILE', '该文件在排除范围内', 403);
     let root: string;
-    try { root = await this.root(mount.absolutePath); } catch (e) { if (e instanceof AppError) throw e; throw new AppError('MOUNT_OFFLINE', '目录离线或不可访问', 503); }
+    try { root = await this.sourceRoot(mount); } catch (e) { if (e instanceof AppError) throw e; throw new AppError('MOUNT_OFFLINE', '目录离线或不可访问', 503); }
     return this.resolveAtRoot(mount, rel, root, internalPackage, access);
   }
   /** Reuse root validation within one listing; every child still checks its complete path. */
@@ -49,7 +67,7 @@ export class PathPolicy {
     relative(rel);
     if (hidden(rel, mount.excludes)) throw new AppError('FORBIDDEN_FILE', '该文件在排除范围内', 403);
     let root: string;
-    try { root = await this.root(mount.absolutePath); } catch (e) { if (e instanceof AppError) throw e; throw new AppError('MOUNT_OFFLINE', '目录离线或不可访问', 503); }
+    try { root = await this.sourceRoot(mount); } catch (e) { if (e instanceof AppError) throw e; throw new AppError('MOUNT_OFFLINE', '目录离线或不可访问', 503); }
     const directory = await this.resolveAtRoot(mount, rel, root, false, 'file');
     if (!directory.stat.isDirectory()) throw new AppError('INVALID_PATH', '请选择目录', 400);
     return { ...directory, resolveChild: async (name: string) => {
@@ -68,6 +86,13 @@ export class PathPolicy {
     const real = await fs.realpath(target);
     if (!inside(root, real) || inside(this.stateDir, real)) throw new AppError('FORBIDDEN_PATH', '真实路径超出可访问范围', 403);
     if(hidden(path.relative(root,real).split(path.sep).join('/'),mount.excludes,internalPackage))throw new AppError('FORBIDDEN_FILE','真实路径在排除范围内',403);
+    if (mount.toolSource) {
+      const segments = real.slice(path.parse(real).root.length).split(path.sep).join('/');
+      const sensitive = process.platform === 'win32' ? [process.env.SystemRoot || 'C:\\Windows', process.env.ProgramFiles || 'C:\\Program Files', process.env.ProgramData || 'C:\\ProgramData'] : ['/etc','/proc','/sys','/dev','/boot'];
+      if (hidden(segments) || sensitive.some(p => inside(p, real))) throw new AppError('FORBIDDEN_PATH', '资源位于受限制的目录', 403);
+      // A tool at a broad root may load static assets, but cannot publish unrelated documents.
+      if (rel && rel !== mount.entry && !/\.(css|[cm]?js|json|csv|svg|png|jpe?g|gif|webp|ico|woff2?|ttf|otf|wasm|mp4|mp3)$/i.test(rel)) throw new AppError('UNSUPPORTED_FILE', '工具仅提供所选 HTML 与静态资源；资源需位于 HTML 同目录或子目录', 403);
+    }
     const stat = await fs.stat(real);
     if (!stat.isDirectory() && !stat.isFile()) throw new AppError('UNSUPPORTED_FILE', '仅支持普通文件和目录', 403);
     if (access === 'preview' && !stat.isDirectory() && !(internalPackage && path.basename(real) === 'package.json') && !mime[path.extname(real).toLowerCase()]) throw new AppError('UNSUPPORTED_FILE', '不提供此文件类型', 403);

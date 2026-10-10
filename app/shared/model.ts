@@ -9,13 +9,15 @@ export const mountPatch = z.object({label:z.string().trim().min(1).max(120).opti
 export const projectSchema = projectInput.extend({ id: z.string(), order: z.number().int() });
 export const mountSchema = mountInput.extend({ id: z.string(), projectId: z.string() });
 export const overrideSchema = z.object({ mountId: z.string(), toolRoot: z.string(), entry: z.string() });
-export const registrySchema = z.object({ schemaVersion: z.literal(1), revision: z.number().int(), projects: z.array(projectSchema), mounts: z.array(mountSchema), toolOverrides: z.array(overrideSchema), entryPreferences: z.record(z.string(), preferenceSchema) });
+export const toolSourceSchema = z.object({ key: z.string().uuid(), id: z.string().min(1), absolutePath: z.string().min(1), excludes: z.array(z.string()).optional() });
+export type ToolSource = z.infer<typeof toolSourceSchema>;
+export const registrySchema = z.object({ schemaVersion: z.literal(1), revision: z.number().int(), projects: z.array(projectSchema), mounts: z.array(mountSchema), toolOverrides: z.array(overrideSchema), entryPreferences: z.record(z.string(), preferenceSchema), toolSources: z.array(toolSourceSchema).optional() });
 export type Project = z.infer<typeof projectSchema>;
-export type Mount = z.infer<typeof mountSchema>;
+export type Mount = z.infer<typeof mountSchema> & { toolSource?: boolean };
 export type RegistryData = z.infer<typeof registrySchema>;
 export type Entry = { id: string; projectId: string; mountId: string; title: string; kind: z.infer<typeof kindSchema>; format: string; relativePath: string; toolRoot?: string; resourceRoot: string; updatedAt: number; refreshMode: 'auto' | 'prompt'; status: 'ready' | 'pending-build' | 'choose-entry'; error?: string; candidates?: string[]; previewUrl?: string; fileVersion?: string };
 export type MountState = { status: 'online' | 'offline' | 'disabled'; error?: string };
-export type Snapshot = { projects: Project[]; mounts: (Mount & MountState)[]; revision: number };
+export type Snapshot = { projects: Project[]; mounts: (Mount & MountState)[]; revision: number; toolSources?: ToolSource[] };
 export type TreeItem = { name: string; relativePath: string; directory: boolean; legacyIds?: string[] };
 /** Reversible references allow opening files without an index. */
 export const fileReference = (mountId: string, relativePath: string) => `file:${mountId}:${relativePath}`;
@@ -26,3 +28,4 @@ export function parseFileReference(id: string) {
 }
 export type ChangeEvent = { mountId: string; projectId: string; revision: number; paths: string[]; entryIds: string[] };
 export const previewPath = (mountId: string, path: string) => `/m/${encodeURIComponent(mountId)}/${path.split('/').map(encodeURIComponent).join('/')}`;
+export const toolPreviewPath = (source: ToolSource) => `/t/${source.key}/${encodeURIComponent(source.absolutePath.split(/[\\/]/).pop()!)}`;
