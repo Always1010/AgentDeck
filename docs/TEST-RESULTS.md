@@ -4,12 +4,14 @@
 
 ## 最终结果
 
-- TypeScript 全局检查、服务端编译及 Vite 正式构建通过。
-- 本次单文件打开功能的 Vitest 关联回归：12 个文件、61 项通过，覆盖独立文件接口、工具兼容、路径安全、文件读取、资源指纹、标签和分屏状态、个人备份、阅读现场及 Markdown；重新选择后类型变化与工具分类的补充断言已通过对应回归，重复运行不累加计数。
-- 本次 Windows Edge / Playwright 关联回归：5 个文件、16 项通过，覆盖单文件选择与粘贴、Markdown 相对图片与文档链接、下载兜底、HTML 工作台内打开、工具分类时保留输入、重复打开与分屏、收藏和现场恢复、移动文件重新定位、快速打开、侧栏和帮助。390 × 844 深色打开弹窗截图已核对；初轮新测试的选择器、命名假设与刷新时重置收藏的设置已修正，修正后的用例均通过。
-- 本次没有重跑全量；上次全量基线为 2026-09-30 的 Vitest 28 个文件、151 项与 Playwright 102 项通过，不作为新增实现的全量验证结论。
-- 正式构建已生成，本次功能在隔离测试实例中验证。现有 4310/4311 后台实例仍运行于改动前，本次未重启用户实例；使用新功能前需先保存页面输入，执行 `npm run background:restart`，再刷新浏览器。
-- 构建仍报告主包体积及 Zod 注释提示，不影响构建成功；当前主包约 649 kB，gzip 约 205 kB。
+- 本次为全量审查后的修复验证，覆盖 AD-032 至 AD-042：来源守卫、Windows 本机路径、资源排除、来源与物理引用、旧预览绑定、部分扫描基线、偏好并发、源码格式切换、目录选择器和 Markdown 锚点，以及开发依赖漏洞。
+- TypeScript 全局检查、服务端编译及 Vite 生产构建通过；构建输出到隔离 `.test-state/code-review-20261010`，未覆盖用户运行实例的 `dist`。
+- Vitest 全量：30 个文件、180 项通过，耗时 28.33 秒。保护核心缺陷的新增回归覆盖部分 EACCES/恢复/重启、14 种 Windows 危险路径在文件系统访问前拒绝、祖先排除、来源与新文件身份及已读隔离、旧预览跨根歧义、GFM 标题与正文锚点一致。
+- Windows Edge / Playwright 全量：111 项通过，耗时约 5.8 分钟；生产进程重启专项另运行 1 项通过，共 112 项。覆盖现有阅读工作台及新增偏好并发、格式重选、目录请求乱序、Markdown 导航和迁移工具界面隔离。审查阶段的 6 项失败已修正：5 项使用当前“从侧栏选择”入口，1 项等待筛选队列保存完成后再刷新；未弱化行为断言。重复定向验证不累加计数。
+- 全量完成后，交互复核补齐 AD-035 的两个已读边界：新工具来源按实际位置确认挂载文件，冲突条目可单条手动标读。补修后重新通过类型检查、服务端编译、隔离前端构建、工具/未读 22 项单测，以及相关 7 项浏览器回归；未重复全量，其余代码保持全量受测版本。新增场景首轮误使用准备阶段旧版本，服务端正确保留新版本未读；清除准备阶段基线后，两条确认路径均通过。
+- 锁文件及本机 `node_modules` 中 source-map-js 已由 1.2.1 更新为 1.2.2；只读预演与获明确许可后的实际安装均仅替换这一包，未运行安装脚本或改变全局包、PATH、包源配置。官方 npm 全依赖审计为 0 项漏洞。安装更新了项目隐藏依赖锁记录，并产生 npm 缓存/日志；没有增加其他依赖版本替换。
+- 现有 4310/4311 后台实例未重启，仍使用旧构建。应用本次修复前先保存页面输入，执行 `npm run background:update` 以停止、正式构建并启动，再刷新浏览器；只执行 restart 不会生成本次新构建。
+- 构建仍报告主包体积及 Zod 注释提示，不影响构建成功；当前主包约 651 kB，gzip 约 205 kB。
 
 ## 覆盖范围
 
@@ -23,7 +25,7 @@
 - 单文件打开：无项目时从顶部或空白阅读区选取文件、带引号路径、默认保留标签、同区重复复用、跨区对照、HTML 即使全局选择浏览器打开也留在工作台、Markdown 相对图片与文档链接、CSV、SVG、代码和不支持类型的下载、独立来源重启恢复、旧 `toolSources` 兼容、重新选择保持 ID 与收藏、文件类型变化后加入工具、挂载引用复用及停用/排除限制。HTML、Markdown 和普通文件分别验证资源范围；没有将独立父目录加入项目。
 - 运行边界：正式与开发模式、端口占用、服务重启、浏览器进程重启、持久浏览器 profile、主服务和预览服务隔离。
 
-2026-09-30 的全量基线包含 AD-030（程序滚动错误提升现场活跃时间）和 AD-031（新增顶部入口挤出窄屏帮助按钮）的修复验证；原有断言保留。
+本次全量继续保留 AD-030（程序滚动错误提升现场活跃时间）和 AD-031（新增顶部入口挤出窄屏帮助按钮）的原有断言。
 
 ## 本机规模样本
 
@@ -31,7 +33,7 @@
 | --- | --- | --- |
 | 恢复 24 个 HTML 标签 | 初始只创建当前页的 1 个 iframe；首次访问另一页后为 2 个，返回时输入保留 | 验证启动数量和实例保活，不代表长时间内存上限 |
 | 连续 60 帧滚动后隐藏页面 | 最终全量中产生 1 次现场写入，刷新后恢复最新位置；独立回归曾测得 1–2 次 | 合并次数受实际帧时长影响，不承诺始终恰为 1 次 |
-| 3 个挂载、1000 个文件 | 登记约 182 ms；首次展开含 334 个文件的目录约 594 ms | 本机单次样本，不作为跨机器性能承诺 |
+| 3 个挂载、1000 个文件 | 登记约 260 ms；首次展开含 334 个文件的目录约 1298 ms | 本次全量的单次样本，不作为跨机器性能承诺 |
 | 收藏或工具列表隐藏 | 超过一个 4 秒周期没有状态请求；恢复后立即核对，快速隐藏并显示也会补查 | 只暂停平台检查，已加载 HTML 自身脚本仍可能运行 |
 | 单文件更新 | 对应记录直接处理；无变化不序列化落盘；重复核对合并 | 通过访问计数、队列和落盘行为测试，不等同于完整 CPU 基准 |
 
@@ -40,12 +42,12 @@
 ```powershell
 npm run typecheck
 npm run build
-node node_modules/vitest/vitest.mjs run tests/independent-files.test.ts tests/tools.test.ts tests/files.test.ts tests/http.test.ts tests/security.test.ts tests/m0.test.ts tests/markdown.test.ts tests/pages.test.ts tests/workspace.test.ts tests/readingSessions.test.ts tests/personalBackup.test.ts tests/resource-version.test.ts
-node node_modules/@playwright/test/cli.js test tests/e2e/independent-files.spec.ts tests/e2e/tools.spec.ts tests/e2e/desktop.spec.ts tests/e2e/help.spec.ts
-node node_modules/@playwright/test/cli.js test tests/e2e/convenience.spec.ts --grep "reopens|quick open"
+node node_modules/vitest/vitest.mjs run
+node node_modules/@playwright/test/cli.js test
+npm audit --registry=https://registry.npmjs.org
 ```
 
-浏览器测试使用隔离状态和临时目录，不读写用户的 AgentDeck 配置。Windows 默认使用本机 Edge；其他系统可通过 `PLAYWRIGHT_CHANNEL` 选择已安装浏览器。后台安装和恢复的专项验证见 [后台运行说明](BACKGROUND.md)。
+以上为正常执行入口，后台运行时勿直接覆盖 dist。本次编译与 Vite 使用独立 outDir，浏览器通过忽略目录中的配置与启动器使用独立 webDir/stateDir；生产重启测试也改用该隔离编译输出。生成的配置、报告、日志与截图未提交。浏览器测试使用隔离状态和临时目录，不读写用户的 AgentDeck 配置。Windows 默认使用本机 Edge；其他系统可通过 `PLAYWRIGHT_CHANNEL` 选择已安装浏览器。后台安装和恢复的专项验证见 [后台运行说明](BACKGROUND.md)。
 
 ## 当前未验证或不保证
 

@@ -391,11 +391,11 @@
 ## AD-042 — 开发依赖锁定到有已知拒绝服务漏洞的 source-map-js
 
 - 日期：2026-10-10
-- 状态：已解决（项目依赖锁文件）
+- 状态：已解决
 - 现象：官方 npm 审计报告 source-map-js 1.2.1 的高危漏洞 GHSA-68fv-2mgg-jv7q / CVE-2026-93749，索引 source map 的巨大偏移值可能长时间阻塞事件循环。该包经开发构建依赖引入，尚未确认应用运行端可利用路径。
 - 原因分析：锁文件固定在受影响版本，上游依赖范围允许已修复的 1.2.2。
-- 解决方案：仅更新此包的锁定版本、官方 tarball 和完整性校验为 1.2.2。已有本机 node_modules 的实际替换属于另行授权的环境变更，不由锁文件修改隐式执行。
-- 验证方式：官方包元数据与[安全公告](https://github.com/advisories/GHSA-68fv-2mgg-jv7q)核对；只读安装预演仅替换这一包；`npm audit --package-lock-only --registry=https://registry.npmjs.org` 为 0 项漏洞。本机已安装依赖状态由当前验证摘要单独说明。
+- 解决方案：仅更新此包的锁定版本、官方 tarball 和完整性校验为 1.2.2；获得明确环境变更许可后，仅替换项目 node_modules 中此包，实际版本已核对为 1.2.2。
+- 验证方式：官方包元数据与[安全公告](https://github.com/advisories/GHSA-68fv-2mgg-jv7q)核对；只读安装预演及实际安装均仅替换这一包；锁文件与安装后的 `npm audit --registry=https://registry.npmjs.org` 均为 0 项漏洞。更新后类型检查、编译与隔离前端构建通过。
 - 相关文件：package-lock.json、docs/TEST-RESULTS.md。
 
 ## AD-033 — 百分号编码的 API 前缀绕过请求来源守卫
