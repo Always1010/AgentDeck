@@ -12,7 +12,7 @@ import { resourceVersion } from './resource-version.js';
 import { mapLimited } from './concurrency.js';
 import type { FileStatusResult } from '../shared/fileOperations.js';
 import { fileVersion } from '../shared/updates.js';
-import { PathPolicy, inside, relative, mime, hidden } from './path-policy.js';
+import { PathPolicy, inside, relative, mime, hidden, localAbsolute } from './path-policy.js';
 import { AppError } from './errors.js';
 import { describeFile, isTextFile, legacyIds } from './files.js';
 import { parseFileReference } from '../shared/model.js';
@@ -184,9 +184,9 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     return { locations: [...new Set([os.homedir(), process.cwd(), ...roots])] };
   });
   main.get<{ Querystring: { absolutePath: string } }>('/api/fs/directories', async req => {
-    const value = req.query.absolutePath;
-    if (!value || !path.isAbsolute(value) || value.startsWith('\\\\')) throw new AppError('INVALID_PATH','需要本机绝对路径');
-    const current = await fs.realpath(value); const dirs = await fs.readdir(current, { withFileTypes: true });
+    const target = localAbsolute(req.query.absolutePath);
+    await policy.noLinks(target);
+    const current = localAbsolute(await fs.realpath(target)); const dirs = await fs.readdir(current, { withFileTypes: true });
     return { current, parent: path.dirname(current), directories: dirs.filter(d => d.isDirectory() && !d.isSymbolicLink() && !d.name.startsWith('.')).map(d => ({ name: d.name, path: path.join(current,d.name) })) };
   });
   async function selectedLocation(value: string, directory = false) {
