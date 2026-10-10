@@ -20,7 +20,7 @@ import { readLegacyReferences } from './legacy-references.js';
 import { listTools, sameFile, fileScope, defaultToolTitle, fileExcludes } from './tools.js';
 import { bridgeScriptPath, htmlBridgeScript, prepareHtmlBridge } from './html-bridge.js';
 import type { ServerResponse } from 'node:http';
-import { projectInput, mountInput, mountPatch, preferenceSchema, overrideSchema, previewPath, filePreviewPath, fileReference, type Mount, type RegistryData, type TreeItem, type FileSource } from '../shared/model.js';
+import { projectInput, mountInput, mountPatch, preferenceSchema, overrideSchema, previewPath, filePreviewPath, fileReference, mountedFileReference, type Mount, type RegistryData, type TreeItem, type FileSource } from '../shared/model.js';
 
 export async function createWorkbench(options: { stateDir: string; port: number; previewPort: number; webDir?: string; dev?: boolean }) {
   const registry = new Registry(path.resolve(options.stateDir)); await registry.load();
@@ -56,7 +56,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     if (registry.data.fileSources?.some(source => source.id === tool.id)) continue;
     const ref = parseFileReference(tool.id);
     const m = ref && registry.data.mounts.find(m => m.id === ref.mountId);
-    if (!ref || !m) continue;
+    if (!ref || ref.mounted || !m) continue;
     try { relative(ref.relativePath, false); } catch { continue; }
     if (hidden(ref.relativePath, m.excludes)) continue;
     const absolutePath = path.resolve(m.absolutePath, ref.relativePath);
@@ -84,8 +84,15 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   });
   if(bindings.length)await registry.mutate(d=>{for(const value of bindings)d.fileSources!.find(source=>source.key===value.key)!.legacyPreview=value.binding;});
   const sourceByKey = (key: string) => { const source = registry.data.fileSources?.find(source => source.key === key); if (!source) throw new AppError('ENTRY_MISSING', '文件来源不存在', 404); return source; };
-  function fileAccess(mountId: string, rel: string) {
+  function fileAccess(mountId: string, rel: string, sourceKey?: string) {
     relative(rel, false);
+    if (sourceKey) {
+      const source = sourceByKey(sourceKey);
+      if (source.id !== fileReference(mountId, rel)) throw new AppError('INVALID_PATH', '文件来源与引用不匹配', 400);
+      return { mount: fileScope(source), path: path.basename(source.absolutePath) };
+    }
+    const physicalMount = registry.data.mounts.find(m => m.id === mountId);
+    if (physicalMount) return { mount: physicalMount, path: rel };
     const source = sourceFor(fileReference(mountId, rel));
     return source ? { mount: fileScope(source), path: path.basename(source.absolutePath) } : { mount: mount(mountId), path: rel };
   }
@@ -130,6 +137,15 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   });
   main.post('/api/file-updates/read',async req=>{
     const input=z.union([z.object({id:z.string().min(1),version:z.string().min(1)}).strict(),z.object({through:z.number().int().nonnegative()}).strict()]).parse(req.body);
+    if ('id' in input) {
+      const ref = parseFileReference(input.id);
+      if (ref?.mounted) input.id = fileReference(ref.mountId, ref.relativePath);
+      else if (ref && sourceFor(input.id)) {
+        // A stable source ID may retain a former mount path after relocation.
+        // Reading that independent file cannot acknowledge the replacement at the old path.
+        if (mountedFileReference(registry.data, ref.mountId, ref.relativePath) !== input.id) return updates.snapshot();
+      }
+    }
     return updates.acknowledge(input);
   });
   main.get('/api/status', async () => ({ previewOrigin, revision: registry.data.revision, schemaVersion: 1, navigation: 'files' }));
@@ -208,7 +224,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     const existing = d.fileSources?.find(source => sameFile(source.absolutePath, real));
     if (existing) return { id: existing.id };
     const m = d.mounts.find(m => inside(m.absolutePath, real));
-    if (m) return { id: fileReference(m.id, path.relative(m.absolutePath, real).split(path.sep).join('/')) };
+    if (m) return { id: mountedFileReference(d, m.id, path.relative(m.absolutePath, real).split(path.sep).join('/')) };
     const key = randomUUID();
     const source: FileSource = { key, id: fileReference(key, path.basename(real)), absolutePath: real,
       ...(resourceScope ? { excludes: fileExcludes(resourceScope, path.relative(resourceScope.absolutePath, real).split(path.sep).join('/')) } : {}) };
@@ -248,16 +264,16 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     });
   });
   async function entry(id:string) {
-    const ref=parseFileReference(id)||aliases.get(id);
+    const ref: ReturnType<typeof parseFileReference> = parseFileReference(id)||aliases.get(id);
     if(!ref)throw new AppError('ENTRY_MISSING','旧链接尚未关联文件，请展开原目录后重试',404);
-    const source = sourceFor(fileReference(ref.mountId, ref.relativePath));
+    const source = ref.mounted ? undefined : sourceFor(fileReference(ref.mountId, ref.relativePath));
     if (source) {
       const scope = fileScope(source);
       const e = await describeFile(policy, registry.data, scope, scope.entry);
       const parent = path.posix.dirname(ref.relativePath);
       return { ...e, ...registry.data.entryPreferences[source.id], id: source.id, mountId: ref.mountId, projectId: registry.data.mounts.find(m => m.id === ref.mountId)?.projectId || '', relativePath: ref.relativePath, resourceRoot: parent === '.' ? '' : parent, previewUrl: previewOrigin + filePreviewPath(source), sourceKey: source.key };
     }
-    const e=await describeFile(policy,registry.data,mount(ref.mountId),ref.relativePath);
+    const e=await describeFile(policy,registry.data,mount(ref.mountId),ref.relativePath,ref.mounted ? id : undefined);
     return {...e,previewUrl:previewOrigin+previewPath(e.mountId,e.relativePath)};
   }
   main.get<{Params:{id:string}}>('/api/entries/:id',async req=>entry(req.params.id));
@@ -283,7 +299,10 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     const abort = new AbortController();
     const disconnected = () => { if (!reply.raw.writableEnded) abort.abort(); };
     req.raw.on('aborted', disconnected); reply.raw.on('close', disconnected);
-    try { return await fileSearch.page(mount(req.params.id), input, abort.signal); }
+    try {
+      const result = await fileSearch.page(mount(req.params.id), input, abort.signal);
+      return { ...result, items: result.items.map(item => ({ ...item, id: mountedFileReference(registry.data, item.mountId, item.relativePath) })) };
+    }
     finally { req.raw.off('aborted', disconnected); reply.raw.off('close', disconnected); }
   });
   main.delete<{ Params: { cursor: string } }>('/api/file-search/:cursor', async req => {
@@ -291,8 +310,8 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     return { ok: true };
   });
   main.get<{ Params: { id: string } }>('/api/mounts/:id/resource-version', async req => {
-    const input = z.object({ path: z.string().min(1) }).parse(req.query);
-    const access = fileAccess(req.params.id, input.path);
+    const input = z.object({ path: z.string().min(1), sourceKey: z.string().uuid().optional() }).parse(req.query);
+    const access = fileAccess(req.params.id, input.path, input.sourceKey);
     return resourceVersion(policy, access.mount, access.path);
   });
   main.get('/api/tools', async () => listTools(registry.data, aliases));
@@ -316,7 +335,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
       if (!source) {
         const key = randomUUID();
         const existingMount = d.mounts.find(m => inside(m.absolutePath, real));
-        const candidate = preferredId || (existingMount ? fileReference(existingMount.id, path.relative(existingMount.absolutePath, real).split(path.sep).join('/')) : undefined);
+        const candidate = preferredId && !parseFileReference(preferredId)?.mounted ? preferredId : (existingMount ? fileReference(existingMount.id, path.relative(existingMount.absolutePath, real).split(path.sep).join('/')) : undefined);
         const id = candidate && !sources.some(source => source.id === candidate) ? candidate : fileReference(key, path.basename(real));
         const rel=existingMount&&path.relative(existingMount.absolutePath,real).split(path.sep).join('/');
         source = { key, id, absolutePath: real, ...(existingMount ? { excludes: fileExcludes(existingMount,rel!),legacyPreview:legacyBinding(existingMount,rel!,real) } : {}) }; sources.push(source);
@@ -364,17 +383,18 @@ export async function createWorkbench(options: { stateDir: string; port: number;
       const rel=[root,d.name].filter(Boolean).join('/');
       try {
         const item=await dir.resolveChild(d.name);
-        const oldIds=item.stat.isDirectory()?[]:legacyIds(m,rel,registry.data);
+        const id = item.stat.isDirectory() ? undefined : mountedFileReference(registry.data, m.id, rel);
+        const oldIds=item.stat.isDirectory() || id !== fileReference(m.id, rel) ? [] : legacyIds(m,rel,registry.data);
         for(const id of oldIds)aliases.set(id,{mountId:m.id,relativePath:rel});
-        return {name:d.name,relativePath:rel,directory:item.stat.isDirectory(),...(!item.stat.isDirectory()?{legacyIds:oldIds}:{})} as TreeItem;
+        return {name:d.name,relativePath:rel,directory:item.stat.isDirectory(),...(!item.stat.isDirectory()?{id,legacyIds:oldIds}:{})} as TreeItem;
       }catch{return undefined;/* identical boundary for tree and serving */}
     });
     const result = children.filter((item): item is TreeItem => !!item);
     const rank=(name:string)=>/\.(html?|csv|md|markdown)$/i.test(name)?0:1;
     return result.sort((a,b)=>Number(b.directory)-Number(a.directory)||(!a.directory&&!b.directory?rank(a.name)-rank(b.name):0)||a.name.localeCompare(b.name,'zh-CN',{numeric:true}));
   });
-  main.get<{Params:{id:string};Querystring:{path:string}}>('/api/mounts/:id/file',async req=>{
-    const access = fileAccess(req.params.id, req.query.path);
+  main.get<{Params:{id:string};Querystring:{path:string;sourceKey?:string}}>('/api/mounts/:id/file',async req=>{
+    const access = fileAccess(req.params.id, req.query.path, req.query.sourceKey);
     const file=await policy.resolve(access.mount,access.path,false,'file');
     if(file.stat.isDirectory()) throw new AppError('INVALID_PATH','不能把目录作为文本读取');
     if(file.stat.size>10*1024*1024) throw new AppError('FILE_TOO_LARGE','文本超过 10 MiB，请使用下载入口',413);
@@ -382,8 +402,8 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     const text=await fs.readFile(file.real,'utf8');const after=await fs.stat(file.real);
     return {text,size:file.stat.size,updatedAt:file.stat.mtimeMs,...(fileVersion(file.stat)===fileVersion(after)?{fileVersion:fileVersion(after)}:{})};
   });
-  main.get<{Params:{id:string};Querystring:{path:string}}>('/api/mounts/:id/download',async(req,reply)=>{
-    const access = fileAccess(req.params.id, req.query.path);
+  main.get<{Params:{id:string};Querystring:{path:string;sourceKey?:string}}>('/api/mounts/:id/download',async(req,reply)=>{
+    const access = fileAccess(req.params.id, req.query.path, req.query.sourceKey);
     const file=await policy.resolve(access.mount,access.path,false,'file');
     if(file.stat.isDirectory()) throw new AppError('INVALID_PATH','不能下载目录');
     return reply.header('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(path.basename(file.real))}`).type('application/octet-stream').send(createReadStream(file.real));

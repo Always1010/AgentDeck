@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useReducer, useRef, useState, type CSSProperties } from 'react';
-import { fileReference, parseFileReference, previewPath, filePreviewPath, type Mount, type Snapshot, type TreeItem, type ToolItem } from '../shared/model.js';
+import { fileReference, mountedFileReference, parseFileReference, previewPath, filePreviewPath, type Mount, type Snapshot, type TreeItem, type ToolItem } from '../shared/model.js';
 import { Management } from './Management.js';
 import { Tree, FileIcon } from './Tree.js';
 import { fullFilePath, treeFileReference } from './fileLocations.js';
@@ -173,7 +173,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   );
   function discovered(mount:Mount,items:TreeItem[]){
     const next={...aliasesRef.current};let changed=false;
-    for(const item of items)for(const old of item.legacyIds||[]){const id=fileReference(mount.id,item.relativePath);if(next[old]!==id){next[old]=id;changed=true;}}
+    for(const item of items)for(const old of item.legacyIds||[]){const id=item.id || fileReference(mount.id,item.relativePath);if(next[old]!==id){next[old]=id;changed=true;}}
     if(changed){aliasesRef.current=next;setAliases(next);}
     const updated=[...new Set(favoritesRef.current.map(id=>next[id]||id))];
     if(updated.some((id,i)=>id!==favoritesRef.current[i])||updated.length!==favoritesRef.current.length){favoritesRef.current=updated;setFavorites(updated);}
@@ -205,16 +205,17 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   }
   async function navigateFile(id: string, mountId: string, path: string, pane: PaneId) {
     activatePane(pane);
-    if (!data.fileSources?.some(source => source.id === id)) { openFile(fileReference(mountId, path), false, pane); return; }
+    if (!data.fileSources?.some(source => source.id === id)) { openFile(mountedFileReference(data, mountId, path), false, pane); return; }
     try {
       const result = await api<{ id: string }>(`/api/files/${encodeURIComponent(id)}/links`, 'POST', { path });
       await reload(); open(result.id, false, pane);
     } catch (error) { setError((error as Error).message); }
   }
   function openUpdate(item:FileUpdate){
-    openFile(item.id);
+    const id = mountedFileReference(data, item.mountId, item.relativePath);
+    openFile(id);
     if(htmlOpening==='browser'&&/\.html?$/i.test(item.relativePath))return;
-    const key=`${workspace.active}:${item.id}`;setUpdateOpen(previous=>({...previous,[key]:(previous[key]||0)+1}));
+    const key=`${workspace.active}:${id}`;setUpdateOpen(previous=>({...previous,[key]:(previous[key]||0)+1}));
   }
   function keepPage(id:string,pane:PaneId=workspace.active){dispatchPages({type:'keep',id:aliasesRef.current[id]||id},pane);}
   function revealInTree(id: string) {

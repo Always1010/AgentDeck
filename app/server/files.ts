@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { fileReference, type Entry, type Mount, type RegistryData } from '../shared/model.js';
+import { fileReference, mountedFileReference, type Entry, type Mount, type RegistryData } from '../shared/model.js';
 import { PathPolicy } from './path-policy.js';
 import { AppError } from './errors.js';
 import { fileVersion } from '../shared/updates.js';
@@ -24,12 +24,12 @@ export function legacyIds(m: Mount, rel: string, registry: RegistryData) {
   }
   return [...new Set(ids)];
 }
-export async function describeFile(policy: PathPolicy, registry: RegistryData, m: Mount, rel: string): Promise<Entry> {
+export async function describeFile(policy: PathPolicy, registry: RegistryData, m: Mount, rel: string, addressId?: string): Promise<Entry> {
   const file = await policy.resolve(m, rel, false, 'file');
   if (file.stat.isDirectory()) throw new AppError('INVALID_PATH', '请选择文件', 400);
-  const id = fileReference(m.id, rel);
+  const id = addressId || mountedFileReference(registry, m.id, rel);
   const format = path.extname(rel).slice(1).toLowerCase();
-  const aliases = legacyIds(m, rel, registry);
+  const aliases = id === fileReference(m.id, rel) ? legacyIds(m, rel, registry) : [];
   const prefs = registry.entryPreferences[id] || aliases.map(key => registry.entryPreferences[key]).find(Boolean) || {};
   return { id, mountId: m.id, projectId: m.projectId, relativePath: rel, title: path.posix.basename(rel), format,
     kind: /^html?$/.test(format) ? 'html' : /^(md|markdown)$/.test(format) ? 'markdown' : /^(csv|json)$/.test(format) ? 'data' : 'text',

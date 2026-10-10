@@ -18,14 +18,33 @@ export type RegistryData = z.infer<typeof registrySchema>;
 export type Entry = { id: string; projectId: string; mountId: string; title: string; kind: z.infer<typeof kindSchema>; format: string; relativePath: string; toolRoot?: string; resourceRoot: string; updatedAt: number; refreshMode: 'auto' | 'prompt'; status: 'ready' | 'pending-build' | 'choose-entry'; error?: string; candidates?: string[]; previewUrl?: string; fileVersion?: string; sourceKey?: string };
 export type MountState = { status: 'online' | 'offline' | 'disabled'; error?: string };
 export type Snapshot = { projects: Project[]; mounts: (Mount & MountState)[]; revision: number; fileSources?: FileSource[] };
-export type TreeItem = { name: string; relativePath: string; directory: boolean; legacyIds?: string[] };
+export type TreeItem = { name: string; relativePath: string; directory: boolean; id?: string; legacyIds?: string[] };
 /** Reversible references allow opening files without an index. */
 export const fileReference = (mountId: string, relativePath: string) => `file:${mountId}:${relativePath}`;
+export const mountedReference = (mountId: string, relativePath: string) => `mounted:${mountId}:${relativePath}`;
+/** Physical mount locations must not inherit a relocated source's stable identity. */
+export function mountedFileReference(data: Pick<RegistryData, 'mounts' | 'fileSources'>, mountId: string, relativePath: string) {
+  const id = fileReference(mountId, relativePath);
+  const mount = data.mounts.find(m => m.id === mountId);
+  if (!mount) return id;
+  const normalize = (value: string) => {
+    const slashes = value.replace(/\\/g, '/');
+    return /^[a-z]:/i.test(slashes) ? slashes.toLowerCase() : slashes;
+  };
+  const source = data.fileSources?.find(source => {
+    const ref = parseFileReference(source.id);
+    return ref && !ref.mounted && ref.mountId === mountId && normalize(`${mount.absolutePath}/${ref.relativePath}`) === normalize(`${mount.absolutePath}/${relativePath}`);
+  });
+  const physical = `${mount.absolutePath.replace(/[\\/]+$/, '')}/${relativePath}`;
+  return source && normalize(source.absolutePath) !== normalize(physical) ? mountedReference(mountId, relativePath) : id;
+}
 export type ToolItem = { id: string; title: string };
 export function parseFileReference(id: string) {
-  const match = /^file:([^:]+):(.+)$/.exec(id);
-  return match ? { mountId: match[1], relativePath: match[2] } : undefined;
+  const match = /^(file|mounted):([^:]+):(.+)$/.exec(id);
+  return match ? { mountId: match[2], relativePath: match[3], ...(match[1] === 'mounted' ? { mounted: true } : {}) } : undefined;
 }
+/** The source key makes independent reads explicit even when an old ID names a mount path. */
+export const entryFileEndpoint = (entry: Entry, operation: 'file' | 'download' | 'resource-version') => `/api/mounts/${encodeURIComponent(entry.mountId)}/${operation}?path=${encodeURIComponent(entry.relativePath)}${entry.sourceKey ? `&sourceKey=${encodeURIComponent(entry.sourceKey)}` : ''}`;
 export type ChangeEvent = { mountId: string; projectId: string; revision: number; paths: string[]; entryIds: string[] };
 export const previewPath = (mountId: string, path: string) => `/m/${encodeURIComponent(mountId)}/${path.split('/').map(encodeURIComponent).join('/')}`;
 export const filePreviewPath = (source: FileSource) => `/t/${source.key}/${encodeURIComponent(source.absolutePath.split(/[\\/]/).pop()!)}`;

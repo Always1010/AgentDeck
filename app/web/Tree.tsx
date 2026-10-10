@@ -99,7 +99,7 @@ export function Tree({revealRequest,visible,initialExpanded,expansionChanged,mou
         {!!listing?.items?.length&&!visibleItems?.length&&<div className="tree-message">没有符合筛选条件的文件</div>}
         {visibleItems?.map(item=>{
           if(item.directory)return directory(item.relativePath,item.name,depth+1);
-          const id=fileReference(mount.id,item.relativePath);const starred=favorites.includes(id);
+          const id=item.id || fileReference(mount.id,item.relativePath);const starred=favorites.includes(id);
           return <div className={`file-row ${selected===id?'selected':''}`} role="none" key={item.relativePath} data-file-path={item.relativePath} style={{paddingLeft:8+(depth+1)*14}}>
             <button className="node-main" role="treeitem" aria-level={depth+2} aria-selected={selected===id} title={item.relativePath} onClick={event=>{if(event.detail<=1)open(id);}} onDoubleClick={()=>open(id,true)}><FileIcon name={item.name}/><span className="filename">{item.name}</span></button>
             {/\.html?$/i.test(item.name)&&<FileOpenMenu name={item.name} url={browserUrl(id)} internal={()=>internal(id)} other={other?()=>other(id):undefined}/>}

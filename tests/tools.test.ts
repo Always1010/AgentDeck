@@ -3,7 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createWorkbench, type Workbench } from '../app/server/server.js';
-import { fileReference } from '../app/shared/model.js';
+import { fileReference, mountedReference, mountedFileReference, entryFileEndpoint } from '../app/shared/model.js';
+import { fullFilePath, treeFileReference } from '../app/web/fileLocations.js';
 import { legacyId } from '../app/server/files.js';
 import { fileScope } from '../app/server/tools.js';
 let temp: string, root: string, app: Workbench, mountId: string;
@@ -115,6 +116,62 @@ test('HTML selection checks actual file types, sources, junctions and broad dire
   const e = (await app.main.inject({url:`/api/entries/${encodeURIComponent(registered.json().id)}`,headers})).json();
   expect(e.previewUrl).toBeTruthy();
   expect((await app.preview.inject({url:new URL(e.previewUrl).pathname.replace(/merge\.html$/, 'private.css'),headers:{host:'127.0.0.1:4311'}})).statusCode).toBe(403);
+});
+
+test('a relocated tool keeps its identity while the original mounted path opens its replacement', async () => {
+  const oldId = fileReference(mountId, 'merge.html');
+  await app.main.inject({ method: 'PUT', url: '/api/tools', headers, payload: { id: oldId, title: '原工具' } });
+  const movedRoot = path.join(temp, 'moved'); await fs.mkdir(movedRoot);
+  const moved = path.join(movedRoot, 'renamed.htm'); await fs.rename(path.join(root, 'merge.html'), moved);
+  await app.main.inject({ method: 'PATCH', url: `/api/tools/${encodeURIComponent(oldId)}`, headers, payload: { absolutePath: moved } });
+  await fs.writeFile(path.join(root, 'merge.html'), '<p>replacement</p>');
+  const physicalId = mountedReference(mountId, 'merge.html');
+  const getEntry = async (id: string) => (await app.main.inject({ url: `/api/entries/${encodeURIComponent(id)}`, headers })).json();
+  const source = await getEntry(oldId), replacement = await getEntry(physicalId);
+  expect(source).toMatchObject({ id: oldId, title: '原工具', sourceKey: app.registry.data.fileSources![0].key, format: 'htm' });
+  expect(replacement).toMatchObject({ id: physicalId, title: 'merge.html', format: 'html', kind: 'html' });
+  expect(replacement.sourceKey).toBeUndefined();
+  const snapshot = (await app.main.inject({ url: '/api/projects', headers })).json();
+  expect(mountedFileReference(snapshot, mountId, 'merge.html')).toBe(physicalId);
+  expect(fullFilePath(snapshot, oldId)).toBe(await fs.realpath(moved)); expect(fullFilePath(snapshot, physicalId)).toBe(await fs.realpath(path.join(root, 'merge.html')));
+  expect(treeFileReference(snapshot, oldId)).toBeUndefined();
+  const tree = (await app.main.inject({ url: `/api/mounts/${mountId}/tree`, headers })).json();
+  expect(tree.find((item: { name: string }) => item.name === 'merge.html')).toMatchObject({ id: physicalId, legacyIds: [] });
+  expect((await app.main.inject({ method: 'POST', url: '/api/files/open', headers, payload: { absolutePath: path.join(root, 'merge.html') } })).json().id).toBe(physicalId);
+  const search = (await app.main.inject({ url: `/api/mounts/${mountId}/search?q=merge`, headers })).json();
+  expect(search.items.map((item: { id: string }) => item.id)).toEqual([physicalId]);
+  for (const operation of ['file', 'download'] as const) {
+    expect((await app.main.inject({ url: entryFileEndpoint(source, operation), headers })).body).toContain('<input>');
+    expect((await app.main.inject({ url: entryFileEndpoint(replacement, operation), headers })).body).toContain('replacement');
+  }
+  expect((await app.main.inject({ url: entryFileEndpoint(source, 'resource-version'), headers })).json().directory).toBe('');
+  expect((await app.main.inject({ url: `/api/mounts/${mountId}/file?path=readme.md&sourceKey=${source.sourceKey}`, headers })).statusCode).toBe(400);
+  await app.main.inject({ method: 'PATCH', url: `/api/entries/${encodeURIComponent(physicalId)}/preferences`, headers, payload: { title: '新文件' } });
+  expect((await getEntry(oldId)).title).toBe('原工具'); expect((await getEntry(physicalId)).title).toBe('新文件');
+  await app.close(); app = await createWorkbench({ stateDir: path.join(temp, 'state'), port: 4310, previewPort: 4311 });
+  expect((await getEntry(oldId)).id).toBe(oldId); expect((await getEntry(physicalId)).title).toBe('新文件');
+  const registered = (await app.main.inject({ method: 'PUT', url: '/api/tools', headers, payload: { id: physicalId } })).json();
+  expect(registered.id).not.toBe(oldId); expect(registered.id).not.toBe(physicalId);
+  expect((await getEntry(physicalId)).sourceKey).toBeUndefined();
+  await app.main.inject({ method: 'PATCH', url: `/api/mounts/${mountId}`, headers, payload: { enabled: false } });
+  expect((await app.main.inject({ url: entryFileEndpoint(source, 'file'), headers })).statusCode).toBe(200);
+  expect((await app.main.inject({ url: entryFileEndpoint(replacement, 'file'), headers })).statusCode).toBe(410);
+});
+
+test('reading a relocated source cannot acknowledge unread content at its former mounted path', async () => {
+  const oldId = fileReference(mountId, 'merge.html');
+  await app.main.inject({ method: 'PUT', url: '/api/tools', headers, payload: { id: oldId } });
+  await app.updates.configure({ mode: 'allow', extensions: ['.html'], custom: [] });
+  const moved = path.join(temp, 'moved.html'); await fs.rename(path.join(root, 'merge.html'), moved);
+  await app.main.inject({ method: 'PATCH', url: `/api/tools/${encodeURIComponent(oldId)}`, headers, payload: { absolutePath: moved } });
+  await fs.writeFile(path.join(root, 'merge.html'), '<p>new content</p>'); await app.updates.reconcile();
+  const unread = app.updates.snapshot().items.find(item => item.relativePath === 'merge.html')!;
+  expect(unread).toBeDefined();
+  // Even the replacement's exact version does not change the old source ID's meaning.
+  await app.main.inject({ method: 'POST', url: '/api/file-updates/read', headers, payload: { id: oldId, version: unread.version } });
+  expect(app.updates.snapshot().total).toBe(1);
+  await app.main.inject({ method: 'POST', url: '/api/file-updates/read', headers, payload: { id: mountedReference(mountId, 'merge.html'), version: unread.version } });
+  expect(app.updates.snapshot().total).toBe(0);
 });
 
 test.each(['private', 'private/nested'])('an excluded ancestor %s keeps all resources private when its selected HTML becomes independent', async exclude => {
