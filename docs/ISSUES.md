@@ -387,3 +387,13 @@
 - 解决方案：保留来源 ID，冲突的挂载物理位置使用 `mounted:` 引用；树、搜索、未读及文档导航统一生成物理引用。独立文本、下载和资源指纹通过 sourceKey 明确寻址；默认挂载接口读取真实挂载。冲突文件不返回旧来源的收藏迁移别名；物理引用已读确认映射内部旧键，迁移来源不能误确认原位置文件。
 - 验证方式：工具、独立文件、文件读取、搜索、旧引用、未读相关单测通过；新增回归覆盖身份、标题、树/搜索/单文件打开、文本/下载/资源指纹、重启、再次工具登记、停用范围和已读隔离。类型检查通过。
 - 相关文件：app/shared/model.ts、app/server/files.ts、app/server/server.ts、app/web/App.tsx、app/web/Tree.tsx、app/web/Viewer.tsx、app/web/viewers/useResourceWatch.ts、tests/tools.test.ts、docs/BACKEND.md。
+
+## AD-042 — 开发依赖锁定到有已知拒绝服务漏洞的 source-map-js
+
+- 日期：2026-10-10
+- 状态：已解决（项目依赖锁文件）
+- 现象：官方 npm 审计报告 source-map-js 1.2.1 的高危漏洞 GHSA-68fv-2mgg-jv7q / CVE-2026-93749，索引 source map 的巨大偏移值可能长时间阻塞事件循环。该包经开发构建依赖引入，尚未确认应用运行端可利用路径。
+- 原因分析：锁文件固定在受影响版本，上游依赖范围允许已修复的 1.2.2。
+- 解决方案：仅更新此包的锁定版本、官方 tarball 和完整性校验为 1.2.2。已有本机 node_modules 的实际替换属于另行授权的环境变更，不由锁文件修改隐式执行。
+- 验证方式：官方包元数据与[安全公告](https://github.com/advisories/GHSA-68fv-2mgg-jv7q)核对；只读安装预演仅替换这一包；`npm audit --package-lock-only --registry=https://registry.npmjs.org` 为 0 项漏洞。本机已安装依赖状态由当前验证摘要单独说明。
+- 相关文件：package-lock.json、docs/TEST-RESULTS.md。
