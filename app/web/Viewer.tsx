@@ -55,12 +55,12 @@ export function Viewer({fullPath,reselect,reveal,reloadRequest=0,acknowledge,doc
   async function readResult(e:Entry,signal?:AbortSignal){return api<{text:string;fileVersion?:string}>(`/api/mounts/${e.mountId}/file?path=${encodeURIComponent(e.relativePath)}`,'GET',undefined,{signal});}
   async function read(e:Entry){return (await readResult(e)).text;}
   async function load(){const prefs=preferenceState();const preferenceRevision=prefs.revision;const task=loads.current.begin();sourceReads.current.cancel();setSourceLoading(false);setLoading(true);setError('');setLoadedVersion('');setHtmlLoaded(false);setImageLoaded(false);
-    try{const e=await api<Entry>(endpoint,'GET',undefined,{signal:task.signal});if(!task.current())return;let contents='';let unsupported=false;
-      if(/^html?$/.test(e.format)||isImageFormat(e.format)) {const response=await fetch(e.previewUrl!,{method:'HEAD',signal:task.signal});if(!task.current())return;if(!response.ok)throw new Error(`页面 HTTP ${response.status}`);if(sourceRef.current&&hasTextSource(e.format)){const result=await readResult(e,task.signal);contents=result.text;e.fileVersion=result.fileVersion;}}
+    try{const e=await api<Entry>(endpoint,'GET',undefined,{signal:task.signal});if(!task.current())return;let contents='';let unsupported=false;const nextSource=sourceRef.current&&hasTextSource(e.format);
+      if(/^html?$/.test(e.format)||isImageFormat(e.format)) {const response=await fetch(e.previewUrl!,{method:'HEAD',signal:task.signal});if(!task.current())return;if(!response.ok)throw new Error(`页面 HTTP ${response.status}`);if(nextSource){const result=await readResult(e,task.signal);contents=result.text;e.fileVersion=result.fileVersion;}}
       else try{const result=await readResult(e,task.signal);contents=result.text;e.fileVersion=result.fileVersion;}catch(error){if(error instanceof ApiError && (error.code==='NOT_TEXT'||error.code==='FILE_TOO_LARGE'))unsupported=true;else throw error;}
       if(!task.current())return;
       const recent=Object.fromEntries(Object.entries(prefs.confirmed).filter(([key])=>(prefs.versions[key as keyof EntryPreference]||0)>preferenceRevision));
-      const loaded={...e,...recent};live.current=loaded;setEntry(loaded);setText(contents);setDownloadOnly(unsupported);setPending('');setVersion(v=>v+1);setLoadedVersion(unsupported?'':e.fileVersion||'');
+      const loaded={...e,...recent};live.current=loaded;setEntry(loaded);setText(contents);setSource(nextSource&&!unsupported);setDownloadOnly(unsupported);setPending('');setVersion(v=>v+1);setLoadedVersion(unsupported?'':e.fileVersion||'');
     }catch(error){if(task.current())setError((error as Error).message);}
     finally{if(task.current())setLoading(false);}
   }
@@ -143,7 +143,7 @@ export function Viewer({fullPath,reselect,reveal,reloadRequest=0,acknowledge,doc
     favorite:{label:favorite?'取消收藏文件':'收藏文件',tip:favorite?'取消收藏':'收藏文件',icon:'star',pressed:favorite,run:toggleFavorite},
     external:{label:'新标签',menuLabel:'在浏览器新标签页打开',tip:'在浏览器新标签页打开',icon:'external',href:entry&&/^html?$/.test(entry.format)?entry.previewUrl:`/preview?entry=${encodeURIComponent(id)}`},
     split:{label:'分屏打开',tip:'在右侧新分屏打开当前文件',icon:'split',disabled:!entry||!other,run:()=>other?.()},
-    source:{label:source?'返回阅读':'查看源码',tip:source?'返回阅读':'查看文件源码',icon:source?'book':'code',disabled:!entry||downloadOnly||loading||sourceLoading||!hasTextSource(entry.format),run:()=>void toggleSource()},
+    source:{label:source?'返回阅读':'查看源码',tip:source?'返回阅读':'查看文件源码',icon:source?'book':'code',disabled:!entry||loading||sourceLoading||(!source&&(downloadOnly||!hasTextSource(entry.format))),run:()=>void toggleSource()},
     copy:{label:'复制原文',tip:'复制文件原文',icon:'copy',disabled:!entry||downloadOnly||!hasTextSource(entry.format),run:()=>void copyOriginal()},
   };
   function renderAction(action:ToolbarAction,inMenu:boolean){const detail=actionDetails[action];const content=inMenu?detail.menuLabel||detail.label:<Icon name={detail.icon} filled={action==='favorite'&&favorite}/>;
