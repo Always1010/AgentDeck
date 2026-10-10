@@ -23,6 +23,63 @@ test.beforeAll(async () => {
   await fs.writeFile(path.join(root, 'values.json'), '{"large":900719925474099312345,"nested":{"zero":-0,"decimal":1.2300e+09},"html":"<img src=x onerror=alert(1)>"}');
   await fs.writeFile(path.join(root, 'invalid.json'), '{"broken":}');
   await fs.writeFile(path.join(root, 'large.csv'), 'one\n'.repeat(1002));
+  await fs.writeFile(path.join(root, 'notes.txt'), '最初文本');
+});
+
+test('saving preferences keeps the loaded version available for change detection', async ({ page }) => {
+  await fs.writeFile(path.join(root, 'notes.txt'), '最初文本');
+  await file(page, 'notes.txt').click();
+  await expect(panel(page).locator('pre')).toContainText('最初文本');
+  await fs.writeFile(path.join(root, 'notes.txt'), '尚未加载的新文本');
+  await panel(page).getByRole('button', { name: '更多设置', exact: true }).click();
+  page.once('dialog', dialog => void dialog.accept('已保存显示名称'));
+  await page.getByRole('button', { name: '显示名称', exact: true }).click();
+  await expect(panel(page).locator('.identity')).toHaveText('已保存显示名称');
+  await expect(panel(page).locator('.notice').filter({ hasText: '文件已更新' })).toBeVisible({ timeout: 10000 });
+  await expect(panel(page).locator('pre')).toContainText('最初文本');
+  await panel(page).getByRole('button', { name: '加载更新', exact: true }).click();
+  await expect(panel(page).locator('pre')).toContainText('尚未加载的新文本');
+});
+
+test('queued preferences and overlapping reloads keep the last saved title', async ({ page }) => {
+  await file(page, 'notes.txt').click();
+  await expect(panel(page).locator('pre')).toBeVisible();
+  let releaseReload!: () => void;
+  let reloadStarted!: () => void;
+  const reloadGate = new Promise<void>(resolve => { releaseReload = resolve; });
+  const reloadReceived = new Promise<void>(resolve => { reloadStarted = resolve; });
+  await page.route('**/api/entries/*', async route => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const response = await route.fetch();
+    reloadStarted(); await reloadGate;
+    await route.fulfill({ response }).catch(() => undefined);
+  });
+  await panel(page).getByRole('button', { name: '刷新', exact: true }).click();
+  await reloadReceived;
+  let releaseFirst!: () => void;
+  let firstStarted!: () => void;
+  const firstGate = new Promise<void>(resolve => { releaseFirst = resolve; });
+  const firstReceived = new Promise<void>(resolve => { firstStarted = resolve; });
+  const writes: string[] = [];
+  await page.route('**/api/entries/*/preferences', async route => {
+    const title = route.request().postDataJSON().title;
+    writes.push(title);
+    if (title === '第一个名称') { firstStarted(); await firstGate; }
+    await route.continue();
+  });
+  for (const title of ['第一个名称', '最终名称']) {
+    await panel(page).getByRole('button', { name: '更多设置', exact: true }).click();
+    page.once('dialog', dialog => void dialog.accept(title));
+    await page.getByRole('button', { name: '显示名称', exact: true }).click();
+    if (title === '第一个名称') await firstReceived;
+  }
+  expect(writes).toEqual(['第一个名称']);
+  releaseFirst();
+  await expect(panel(page).locator('.identity')).toHaveText('最终名称');
+  releaseReload();
+  await expect(panel(page).getByRole('button', { name: '刷新', exact: true })).toBeEnabled();
+  await expect(panel(page).locator('.identity')).toHaveText('最终名称');
+  expect(writes).toEqual(['第一个名称', '最终名称']);
 });
 test.afterAll(async () => { await fs.rm(root, { recursive: true, force: true }); });
 test.beforeEach(async ({ page }) => {
