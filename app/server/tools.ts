@@ -1,10 +1,13 @@
 import path from 'node:path';
-import { fileReference, parseFileReference, type RegistryData, type ToolItem } from '../shared/model.js';
+import { fileReference, parseFileReference, type RegistryData, type ToolItem, type ToolSource, type Mount } from '../shared/model.js';
 import { legacyId } from './files.js';
 
 /** Explicit registrations and known legacy tool locations only; no filesystem discovery. */
 export function listTools(registry: RegistryData, aliases: Map<string, { mountId: string; relativePath: string }>): ToolItem[] {
   const candidates = new Map<string, string | undefined>();
+  for (const source of registry.toolSources || []) {
+    if (registry.entryPreferences[source.id]?.kind === 'tool') candidates.set(source.id, defaultToolTitle(source.absolutePath));
+  }
   for (const [old, ref] of aliases) {
     if (old !== legacyId(ref.mountId, ref.relativePath) || registry.entryPreferences[old]?.kind === 'tool') {
       candidates.set(fileReference(ref.mountId, ref.relativePath), registry.entryPreferences[old]?.title);
@@ -37,4 +40,19 @@ export function listTools(registry: RegistryData, aliases: Map<string, { mountId
     result.push({ id, title: prefs?.title || oldTitle || fallback });
   }
   return result.sort((a, b) => a.title.localeCompare(b.title, 'zh-CN', { numeric: true }) || a.id.localeCompare(b.id));
+}
+
+export const sameFile = (a: string, b: string) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+export function defaultToolTitle(absolutePath: string) {
+  const filename = path.basename(absolutePath);
+  return /^index\.html?$/i.test(filename) ? path.basename(path.dirname(absolutePath)) || filename.replace(/\.html?$/i, '') : filename.replace(/\.html?$/i, '');
+}
+/** Internal access scope; never included in project mounts, trees or directory searches. */
+export function toolScope(source: ToolSource): Mount {
+  return { id: source.key, projectId: '', label: defaultToolTitle(source.absolutePath), absolutePath: path.dirname(source.absolutePath), mode: 'single-tool', entry: path.basename(source.absolutePath), enabled: true, toolDirectories: [], excludes: source.excludes || [], toolSource: true };
+}
+export function toolExcludes(mount: Mount, entryPath: string) {
+  const parent = path.posix.dirname(entryPath);
+  const prefix = parent === '.' ? '' : `${parent}/`;
+  return mount.excludes.filter(exclude => exclude.startsWith(prefix)).map(exclude => exclude.slice(prefix.length));
 }

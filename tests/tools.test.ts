@@ -40,3 +40,61 @@ test('known legacy tool entries are restored without scanning and explicit remov
   await app.close();app=await createWorkbench({stateDir:path.join(temp,'state'),port:4310,previewPort:4311});
   expect((await app.main.inject({url:'/api/tools',headers})).json()).toEqual([]);
 });
+
+test('absolute HTML registration works without mounts and serves bounded original assets', async () => {
+  await app.main.inject({method:'DELETE',url:`/api/projects/${app.registry.data.projects[0].id}`,headers,payload:{}});
+  const html = path.join(temp, 'tool.HTML');
+  await fs.writeFile(html, '<link rel="stylesheet" href="assets/app.css"><input>');
+  await fs.mkdir(path.join(temp, 'assets')); await fs.writeFile(path.join(temp, 'assets', 'app.css'), 'body{color:red}');
+  await fs.writeFile(path.join(temp, 'secret.key'), 'private');
+  const register = () => app.main.inject({method:'PUT',url:'/api/tools',headers,payload:{absolutePath:html,title:'独立工具'}});
+  const first = (await register()).json(); const second = (await register()).json();
+  expect(first.alreadyRegistered).toBe(false); expect(second).toEqual({id:first.id,alreadyRegistered:true});
+  const snapshot = (await app.main.inject({url:'/api/projects',headers})).json();
+  expect(snapshot.mounts).toEqual([]); expect(snapshot.projects).toEqual([]);
+  const e = (await app.main.inject({url:`/api/entries/${encodeURIComponent(first.id)}`,headers})).json();
+  const url = new URL(e.previewUrl).pathname; const base = url.slice(0,url.lastIndexOf('/')+1);
+  const previewHeaders = {host:'127.0.0.1:4311'};
+  expect((await app.preview.inject({url,headers:previewHeaders})).body).toContain('<input>');
+  expect((await app.preview.inject({url:base+'assets/app.css',headers:previewHeaders})).body).toBe('body{color:red}');
+  for (const resource of ['%2e%2e%2foutside.css','%5c..%5coutside.css','secret.key','state/registry.json','project/readme.md']) {
+    expect((await app.preview.inject({url:base+resource,headers:previewHeaders})).statusCode).toBeGreaterThanOrEqual(400);
+  }
+  expect((await app.main.inject({url:`/api/mounts/${e.mountId}/tree`,headers})).statusCode).toBe(404);
+  expect((await app.main.inject({url:`/api/mounts/${e.mountId}/file?path=${encodeURIComponent(e.relativePath)}`,headers})).body).toContain('<input>');
+  expect((await app.main.inject({url:`/api/mounts/${e.mountId}/resource-version?path=${encodeURIComponent(e.relativePath)}`,headers})).statusCode).toBe(200);
+  await app.close(); app=await createWorkbench({stateDir:path.join(temp,'state'),port:4310,previewPort:4311});
+  expect((await app.main.inject({url:'/api/tools',headers})).json()).toEqual([{id:first.id,title:'独立工具'}]);
+});
+
+test('mounted tools keep their ID and survive project removal; relocated tools keep their references', async () => {
+  const id = fileReference(mountId,'merge.html');
+  await app.main.inject({method:'PUT',url:'/api/tools',headers,payload:{id,title:'原名称'}});
+  expect((await app.main.inject({method:'PUT',url:'/api/tools',headers,payload:{absolutePath:path.join(root,'merge.html')}})).json().id).toBe(id);
+  await app.main.inject({method:'DELETE',url:`/api/projects/${app.registry.data.projects[0].id}`,headers,payload:{}});
+  expect((await app.main.inject({url:`/api/entries/${encodeURIComponent(id)}`,headers})).statusCode).toBe(200);
+  expect((await app.preview.inject({url:`/m/${mountId}/merge.html`,headers:{host:'127.0.0.1:4311'}})).statusCode).toBe(200);
+  const moved = path.join(temp,'renamed.htm'); await fs.rename(path.join(root,'merge.html'),moved);
+  expect((await app.main.inject({url:`/api/entries/${encodeURIComponent(id)}`,headers})).statusCode).toBe(404);
+  expect((await app.main.inject({method:'PATCH',url:`/api/tools/${encodeURIComponent(id)}`,headers,payload:{absolutePath:moved}})).json()).toEqual({id});
+  const e = (await app.main.inject({url:`/api/entries/${encodeURIComponent(id)}`,headers})).json();
+  expect(e.title).toBe('原名称'); expect(new URL(e.previewUrl).pathname).toContain('renamed.htm');
+  expect((await app.preview.inject({url:new URL(e.previewUrl).pathname,headers:{host:'127.0.0.1:4311'}})).statusCode).toBe(200);
+  await app.main.inject({method:'DELETE',url:`/api/tools/${encodeURIComponent(id)}`,headers,payload:{}});
+  expect((await app.main.inject({url:'/api/tools',headers})).json()).toEqual([]);
+  expect((await app.main.inject({url:`/api/entries/${encodeURIComponent(id)}`,headers})).statusCode).toBe(200);
+  expect(await fs.readFile(moved,'utf8')).toBe('<input>');
+});
+
+test('HTML selection checks actual file types, sources, junctions and broad directory locations', async () => {
+  for (const [absolutePath,status] of [[path.join(root,'readme.md'),400],[root,400],[path.join(root,'missing.html'),404],['relative.html',400],[path.join(temp,'state','registry.json'),403]] as const) {
+    expect((await app.main.inject({method:'PUT',url:'/api/tools',headers,payload:{absolutePath}})).statusCode).toBe(status);
+  }
+  await fs.symlink(root,path.join(temp,'linked'),process.platform==='win32'?'junction':'dir');
+  expect((await app.main.inject({method:'PUT',url:'/api/tools',headers,payload:{absolutePath:path.join(temp,'linked','merge.html')}})).statusCode).toBe(403);
+  expect((await app.main.inject({method:'PUT',url:'/api/tools',headers:{...headers,origin:'https://example.com'},payload:{absolutePath:path.join(root,'merge.html')}})).statusCode).toBe(403);
+  const listing = (await app.main.inject({url:`/api/fs/html-files?absolutePath=${encodeURIComponent(root)}`,headers})).json();
+  expect(listing.items.map((item:{name:string})=>item.name)).toEqual(['merge.html']);
+  await expect(app.policy.toolLocation(os.homedir(),true)).resolves.toBeTruthy();
+  await expect(app.policy.toolLocation(path.parse(root).root,true)).resolves.toBeTruthy();
+});
