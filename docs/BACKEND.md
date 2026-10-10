@@ -118,14 +118,14 @@
 
 | 方法与路径 | 参数 | 作用与响应 |
 | --- | --- | --- |
-| `GET /api/mounts/:id/tree` | `?path=<相对目录>`，省略时为挂载根目录。 | 读取一层目录，返回 `TreeItem[]`：`{ name, relativePath, directory, legacyIds? }`。目录在前；HTML、CSV、Markdown 随后；再按自然排序。 |
+| `GET /api/mounts/:id/tree` | `?path=<相对目录>`，省略时为挂载根目录。 | 读取一层目录，返回 `TreeItem[]`：`{ name, relativePath, directory, id?, legacyIds? }`。文件的 `id` 为当前物理引用；冲突时不返回旧来源别名。目录在前；HTML、CSV、Markdown 随后；再按自然排序。 |
 | `GET /api/entries/:id` | `:id` 为文件引用或可恢复的旧 ID。 | 获取单个文件元信息 `Entry`，并追加 `previewUrl`。目录会返回 `400`。 |
 | `POST /api/entries/status` | `{ ids: string[] }`，最多 200 项。 | 只读批量核对，返回 `{ items: [{ id, status: "ready", fileVersion? } \| { id, status: "error", error: { code, message } }] }`，结果与输入顺序对应。内部去重并最多同时核对 8 项，单项失败不阻断其他项。 |
 | `GET /api/mounts/:id/search` | `?path=<相对目录>&q=<关键词>&limit=100&cursor=<可选游标>` | 在该挂载指定目录及子目录查文件名和路径，返回 `{ items: [{ id, mountId, name, relativePath, format }], nextCursor?, scanned, skipped, done }`。`path` 默认根目录，关键词 1–200 字，`limit` 为 1–200。 |
 | `DELETE /api/file-search/:cursor` | JSON 请求体 `{}`。 | 释放一次目录搜索的游标及目录句柄，返回 `{ ok: true }`；不存在的游标也可安全取消。 |
-| `GET /api/mounts/:id/resource-version` | `?path=<HTML 相对路径>` | 返回同目录直接资源的元数据指纹 `{ version, directory, scope: "same-directory", count }`。入口须为现存 HTML 文件；不读取正文或解析依赖。 |
-| `GET /api/mounts/:id/file` | `?path=<相对文件路径>` | 读取文本，返回 `{ text, size, updatedAt, fileVersion? }`。只有读取前后版本一致才返回 `fileVersion`。文件大于 10 MiB 返回 `413`；二进制或不受支持的文本类型返回 `415`。 |
-| `GET /api/mounts/:id/download` | `?path=<相对文件路径>` | 以 `application/octet-stream` 和附件文件名流式下载任意允许的普通文件。 |
+| `GET /api/mounts/:id/resource-version` | `?path=<HTML 相对路径>&sourceKey=<可选来源 UUID>` | 返回同目录直接资源的元数据指纹 `{ version, directory, scope: "same-directory", count }`。入口须为现存 HTML 文件；不读取正文或解析依赖。 |
+| `GET /api/mounts/:id/file` | `?path=<相对文件路径>&sourceKey=<可选来源 UUID>` | 读取文本，返回 `{ text, size, updatedAt, fileVersion? }`。只有读取前后版本一致才返回 `fileVersion`。文件大于 10 MiB 返回 `413`；二进制或不受支持的文本类型返回 `415`。 |
+| `GET /api/mounts/:id/download` | `?path=<相对文件路径>&sourceKey=<可选来源 UUID>` | 以 `application/octet-stream` 和附件文件名流式下载任意允许的普通文件。 |
 | `PATCH /api/entries/:id/preferences` | `{ title?, kind?, refreshMode? }` | 保存条目的显示偏好；`refreshMode` 为 `auto` 或 `prompt`。返回 `{ ok: true }`。 |
 
 文本读取支持 HTML、CSS、JavaScript/TypeScript、JSON、CSV、Markdown、TXT、常见代码和配置文件等。文件树接口只读一层，文本接口只读指定文件；CSV 表格、JSON 结构和图片缩放由前端完成，后端不会转换原始数值。下载可用于不支持预览或文本读取的允许文件。
@@ -192,7 +192,7 @@
 
 `app/server/updates.ts` 提供单实例文件变更检测。首次由界面初始化共享文件类型筛选，此后服务启动自动恢复。文件树仍按需读取；更新检测在建立基线、筛选范围变化、挂载变化及每 5 分钟核对时遍历允许访问的目录，仅读取元数据，不解析正文或标题。每个允许目录使用系统目录通知，650 ms 合并事件，普通文件变化只核对对应路径。超过 1000 个待处理路径合并为该挂载的一次核对。排除目录和符号链接不进入扫描，也不建立监听。
 
-状态原子保存到状态目录的 `file-updates.json`，独立于注册表。首次存量文件不产生未读；筛选重新纳入的类型建立当前基线，已有未读保留。服务停止期间的变化通过启动核对补充，不能恢复已经删除的短暂文件及所有中间版本。记录损坏时保留原文件并向界面报告，不覆盖为空状态。无法访问的目录保留旧记录，核对时重试。
+状态原子保存到状态目录的 `file-updates.json`，独立于注册表。首次存量文件不产生未读；筛选重新纳入的类型建立当前基线，已有未读保留。部分目录扫描失败时，可读范围立即建立基线，失败范围单独保留以前的配置/筛选或尚未初始化状态；恢复按各范围建立或推进基线，不能让一处权限错误吞掉整个挂载的后续变化。服务停止期间的变化通过启动核对补充，不能恢复已经删除的短暂文件及所有中间版本。记录损坏时保留原文件并向界面报告，不覆盖为空状态。无法访问的目录保留旧记录，核对时重试。
 
 | 方法与路径 | 作用 |
 | --- | --- |
