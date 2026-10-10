@@ -5,6 +5,7 @@ import os from 'node:os';
 import { createWorkbench, type Workbench } from '../app/server/server.js';
 import { fileReference } from '../app/shared/model.js';
 import { legacyId } from '../app/server/files.js';
+import { fileScope } from '../app/server/tools.js';
 let temp: string, root: string, app: Workbench, mountId: string;
 const headers = {host:'127.0.0.1:4310','sec-fetch-site':'same-origin',origin:'http://127.0.0.1:4310','x-workbench':'1','content-type':'application/json'};
 beforeEach(async () => {
@@ -114,4 +115,57 @@ test('HTML selection checks actual file types, sources, junctions and broad dire
   const e = (await app.main.inject({url:`/api/entries/${encodeURIComponent(registered.json().id)}`,headers})).json();
   expect(e.previewUrl).toBeTruthy();
   expect((await app.preview.inject({url:new URL(e.previewUrl).pathname.replace(/merge\.html$/, 'private.css'),headers:{host:'127.0.0.1:4311'}})).statusCode).toBe(403);
+});
+
+test.each(['private', 'private/nested'])('an excluded ancestor %s keeps all resources private when its selected HTML becomes independent', async exclude => {
+  const directory = path.join(root, 'private', 'nested');
+  await fs.mkdir(path.join(directory, 'assets'), { recursive: true });
+  const html = path.join(directory, 'index.html');
+  await fs.writeFile(html, '<link href="private.css">');
+  await fs.writeFile(path.join(directory, 'private.css'), 'private');
+  await fs.writeFile(path.join(directory, 'assets', 'secret.svg'), '<svg/>');
+  await app.main.inject({ method: 'PATCH', url: `/api/mounts/${mountId}`, headers, payload: { excludes: [process.platform === 'win32' ? exclude.toUpperCase() : exclude] } });
+  const registered = await app.main.inject({ method: 'PUT', url: '/api/tools', headers, payload: { absolutePath: html } });
+  expect(registered.statusCode).toBe(200);
+  const id = registered.json().id;
+  const source = app.registry.data.fileSources!.find(source => source.id === id)!;
+  expect(source.excludes).toEqual(['']);
+  const entry = await app.main.inject({ url: `/api/entries/${encodeURIComponent(id)}`, headers });
+  expect(entry.statusCode).toBe(200);
+  const preview = new URL(entry.json().previewUrl).pathname;
+  expect((await app.preview.inject({ url: preview, headers: { host: '127.0.0.1:4311' } })).statusCode).toBe(200);
+  for (const resource of ['private.css', 'assets/secret.svg']) {
+    expect((await app.preview.inject({ url: preview.replace('index.html', resource), headers: { host: '127.0.0.1:4311' } })).statusCode).toBe(403);
+  }
+  await expect(app.policy.resolve({ ...fileScope(source), entry: '.private.html' }, '.private.html', false, 'file')).rejects.toMatchObject({ code: 'FORBIDDEN_FILE' });
+  // Re-selecting an existing tool must inherit the destination's restrictions too.
+  await app.main.inject({ method: 'PATCH', url: `/api/tools/${encodeURIComponent(id)}`, headers, payload: { absolutePath: html } });
+  expect(app.registry.data.fileSources!.find(source => source.id === id)!.excludes).toEqual(['']);
+});
+
+test('startup repairs legacy resource exclusions only while source identity still matches its mounted location', async () => {
+  const privateDirectory = path.join(root, 'private');
+  const relocated = path.join(temp, 'relocated');
+  await fs.mkdir(privateDirectory); await fs.mkdir(relocated);
+  await fs.writeFile(path.join(privateDirectory, 'index.html'), '<title>private tool</title>');
+  await fs.writeFile(path.join(privateDirectory, 'private.css'), 'private');
+  await fs.writeFile(path.join(privateDirectory, 'moved.html'), '<title>moved tool</title>');
+  await app.main.inject({ method: 'PATCH', url: `/api/mounts/${mountId}`, headers, payload: { excludes: ['private'] } });
+  const register = (filename: string) => app.main.inject({ method: 'PUT', url: '/api/tools', headers, payload: { absolutePath: path.join(privateDirectory, filename) } });
+  const retainedId = (await register('index.html')).json().id;
+  const movedId = (await register('moved.html')).json().id;
+  await fs.rename(path.join(privateDirectory, 'moved.html'), path.join(relocated, 'moved.html'));
+  await fs.writeFile(path.join(relocated, 'public.css'), 'public');
+  await app.main.inject({ method: 'PATCH', url: `/api/tools/${encodeURIComponent(movedId)}`, headers, payload: { absolutePath: path.join(relocated, 'moved.html') } });
+  const stored = structuredClone(app.registry.data);
+  const retainedKey = stored.fileSources!.find(source => source.id === retainedId)!.key;
+  for (const source of stored.fileSources!) source.excludes = [];
+  await app.close(); await fs.writeFile(path.join(temp, 'state', 'registry.json'), JSON.stringify(stored));
+  app = await createWorkbench({ stateDir: path.join(temp, 'state'), port: 4310, previewPort: 4311 });
+  expect(app.registry.data.fileSources!.find(source => source.id === retainedId)).toMatchObject({ key: retainedKey, excludes: [''] });
+  expect(app.registry.data.fileSources!.find(source => source.id === movedId)!.excludes).toEqual([]);
+  const retainedEntry = (await app.main.inject({ url: `/api/entries/${encodeURIComponent(retainedId)}`, headers })).json();
+  const movedEntry = (await app.main.inject({ url: `/api/entries/${encodeURIComponent(movedId)}`, headers })).json();
+  expect((await app.preview.inject({ url: new URL(retainedEntry.previewUrl).pathname.replace('index.html', 'private.css'), headers: { host: '127.0.0.1:4311' } })).statusCode).toBe(403);
+  expect((await app.preview.inject({ url: new URL(movedEntry.previewUrl).pathname.replace('moved.html', 'public.css'), headers: { host: '127.0.0.1:4311' } })).statusCode).toBe(200);
 });

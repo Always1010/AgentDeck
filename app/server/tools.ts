@@ -56,5 +56,8 @@ export function fileExcludes(mount: Mount, entryPath: string) {
   const parent = path.posix.dirname(entryPath);
   const prefix = parent === '.' ? '' : `${parent}/`;
   const normalized = (value: string) => process.platform === 'win32' ? value.toLowerCase() : value;
+  // Selecting an entry explicitly allows that file, while an excluded ancestor
+  // still denies every sibling/descendant resource in its independent scope.
+  if (mount.excludes.some(exclude => normalized(parent) === normalized(exclude) || normalized(parent).startsWith(`${normalized(exclude)}/`))) return [''];
   return mount.excludes.filter(exclude => normalized(exclude) !== normalized(entryPath) && normalized(exclude).startsWith(normalized(prefix))).map(exclude => exclude.slice(prefix.length));
 }

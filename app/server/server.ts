@@ -41,6 +41,17 @@ export async function createWorkbench(options: { stateDir: string; port: number;
   // Migrate known registrations without discovering/scanning files; IDs and names stay intact.
   const migrated: FileSource[] = [];
   const migrationTitles = new Map<string, string>();
+  const repairedExcludes = new Map<string, string[]>();
+  for (const source of registry.data.fileSources || []) {
+    const ref = parseFileReference(source.id);
+    const m = ref && registry.data.mounts.find(m => m.id === ref.mountId);
+    if (!ref || !m) continue;
+    try { relative(ref.relativePath, false); } catch { continue; }
+    const absolutePath = path.resolve(m.absolutePath, ref.relativePath);
+    if (!inside(m.absolutePath, absolutePath) || !sameFile(source.absolutePath, absolutePath)) continue;
+    const excludes = [...new Set([...(source.excludes || []), ...fileExcludes(m, ref.relativePath)])];
+    if (JSON.stringify(excludes) !== JSON.stringify(source.excludes || [])) repairedExcludes.set(source.id, excludes);
+  }
   for (const tool of listTools(registry.data, aliases)) {
     if (registry.data.fileSources?.some(source => source.id === tool.id)) continue;
     const ref = parseFileReference(tool.id);
@@ -53,8 +64,9 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     migrated.push({ key: randomUUID(), id: tool.id, absolutePath, excludes: fileExcludes(m, ref.relativePath) });
     migrationTitles.set(tool.id, tool.title);
   }
-  if (migrated.length) await registry.mutate(d => {
+  if (migrated.length || repairedExcludes.size) await registry.mutate(d => {
     (d.fileSources ||= []).push(...migrated);
+    for (const source of d.fileSources) if (repairedExcludes.has(source.id)) source.excludes = repairedExcludes.get(source.id)!;
     for (const source of migrated) d.entryPreferences[source.id] = { ...d.entryPreferences[source.id], kind: 'tool', title: migrationTitles.get(source.id)! };
   });
   const sourceFor = (id: string) => registry.data.fileSources?.find(source => source.id === id);
@@ -308,7 +320,8 @@ export async function createWorkbench(options: { stateDir: string; port: number;
       const duplicate = d.fileSources?.find(other => other.id !== source.id && sameFile(other.absolutePath, real));
       if (duplicate) throw new AppError('TOOL_EXISTS', '此 HTML 已登记，请使用已有工具', 409, { id: duplicate.id });
       source.absolutePath = real;
-      source.excludes = [];
+      const mounted = d.mounts.find(m => inside(m.absolutePath, real));
+      source.excludes = mounted ? fileExcludes(mounted, path.relative(mounted.absolutePath, real).split(path.sep).join('/')) : [];
       if (input.title) d.entryPreferences[source.id] = { ...d.entryPreferences[source.id], title: input.title };
       return { id: source.id };
     });
