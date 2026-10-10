@@ -12,10 +12,14 @@ export function relative(value: string, allowEmpty = true) {
 }
 export function hidden(rel: string, excludes: string[] = [], internalPackage = false) {
   const key=process.platform==='win32'?rel.toLowerCase():rel;
-  return rel.split('/').some(s => s.startsWith('.') || /^(node_modules|__pycache__|coverage|credentials|secrets)$/i.test(s) || /(?:\.lock|\.pem|\.key|\.pfx|\.p12|\.tmp|\.bak|~)$/i.test(s) || /^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|id_rsa|id_ed25519)$/i.test(s) || (!internalPackage && s.toLowerCase() === 'package.json')) || excludes.some(value => {const x=process.platform==='win32'?value.toLowerCase():value;return key === x || key.startsWith(`${x}/`);});
+  return rel.split('/').some(s => s.startsWith('.') || /^(node_modules|__pycache__|coverage|credentials|secrets)$/i.test(s) || /(?:\.lock|\.pem|\.key|\.pfx|\.p12|\.tmp|\.bak|~)$/i.test(s) || /^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|id_rsa|id_ed25519)$/i.test(s) || (!internalPackage && s.toLowerCase() === 'package.json')) || excludes.some(value => {const x=process.platform==='win32'?value.toLowerCase():value;return !x || key === x || key.startsWith(`${x}/`);});
 }
 export class PathPolicy {
   constructor(public stateDir: string) {}
+  private excludes(mount: Mount, rel: string) {
+    const selected = mount.fileSource && (process.platform === 'win32' ? rel.toLowerCase() === mount.entry.toLowerCase() : rel === mount.entry);
+    return selected ? [] : mount.excludes;
+  }
   async noLinks(target: string) {
     const parsed = path.parse(target); let cursor = parsed.root;
     for (const part of target.slice(parsed.root.length).split(path.sep).filter(Boolean)) {
@@ -60,7 +64,7 @@ export class PathPolicy {
   async resolve(mount: Mount, rel: string, internalPackage = false, access: 'preview' | 'file' = 'preview') {
     if (!mount.enabled) throw new AppError('MOUNT_DISABLED', '挂载已停用', 410);
     relative(rel);
-    if (hidden(rel, mount.excludes, internalPackage)) throw new AppError('FORBIDDEN_FILE', '该文件在排除范围内', 403);
+    if (hidden(rel, this.excludes(mount, rel), internalPackage)) throw new AppError('FORBIDDEN_FILE', '该文件在排除范围内', 403);
     let root: string;
     try { root = await this.sourceRoot(mount); } catch (e) { if (e instanceof AppError) throw e; throw new AppError('MOUNT_OFFLINE', '目录离线或不可访问', 503); }
     return this.resolveAtRoot(mount, rel, root, internalPackage, access);
@@ -83,13 +87,14 @@ export class PathPolicy {
   private async resolveAtRoot(mount: Mount, rel: string, root: string, internalPackage: boolean, access: 'preview' | 'file') {
     if (!mount.enabled) throw new AppError('MOUNT_DISABLED', '挂载已停用', 410);
     relative(rel);
-    if (hidden(rel, mount.excludes, internalPackage)) throw new AppError('FORBIDDEN_FILE', '该文件在排除范围内', 403);
+    if (hidden(rel, this.excludes(mount, rel), internalPackage)) throw new AppError('FORBIDDEN_FILE', '该文件在排除范围内', 403);
     const target = path.resolve(root, rel);
     if (!inside(root, target) || inside(this.stateDir, target)) throw new AppError('FORBIDDEN_PATH', '文件超出可访问范围', 403);
     await this.noLinks(target);
     const real = await fs.realpath(target);
     if (!inside(root, real) || inside(this.stateDir, real)) throw new AppError('FORBIDDEN_PATH', '真实路径超出可访问范围', 403);
-    if(hidden(path.relative(root,real).split(path.sep).join('/'),mount.excludes,internalPackage))throw new AppError('FORBIDDEN_FILE','真实路径在排除范围内',403);
+    const realRelative = path.relative(root,real).split(path.sep).join('/');
+    if(hidden(realRelative,this.excludes(mount,realRelative),internalPackage))throw new AppError('FORBIDDEN_FILE','真实路径在排除范围内',403);
     if (mount.fileSource) {
       const segments = real.slice(path.parse(real).root.length).split(path.sep).join('/');
       const sensitive = process.platform === 'win32' ? [process.env.SystemRoot || 'C:\\Windows', process.env.ProgramFiles || 'C:\\Program Files', process.env.ProgramData || 'C:\\ProgramData'] : ['/etc','/proc','/sys','/dev','/boot'];
