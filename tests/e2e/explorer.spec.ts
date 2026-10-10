@@ -47,6 +47,8 @@ test('type black and white lists hide only tree files, keep folders and persist'
  await expect(page.getByRole('treeitem',{name:'readme.md',exact:true})).toBeVisible();
  await expect(page.getByRole('treeitem',{name:'script.py',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'关闭文件类型筛选'}).click();
+ await expect(page.getByText('正在同步文件类型筛选…',{exact:true})).toHaveCount(0);
+ await expect.poll(async()=> (await json(page,'/api/file-updates')).filter).toEqual({mode:'allow',extensions:['.md'],custom:[]});
  await page.reload();await expect(page.getByRole('treeitem',{name:'研究资料',exact:true})).toHaveAttribute('aria-expanded','true');
  await expect(page.getByRole('treeitem',{name:'readme.md',exact:true})).toBeVisible();
  await expect(page.getByRole('treeitem',{name:'index.html',exact:true})).toHaveCount(0);

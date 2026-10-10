@@ -118,14 +118,14 @@ test('splitting an empty reading area creates another empty area', async ({ page
   await expect(page.locator('[data-pane]')).toHaveCount(2);
   await expect(pane(page, 0).getByRole('tab')).toHaveCount(0);
   await expect(pane(page, 1).getByRole('tab')).toHaveCount(0);
-  await expect(pane(page, 1).getByRole('button', { name: '选择文件', exact: true })).toBeVisible();
+  await expect(pane(page, 1).getByRole('button', { name: '从侧栏选择', exact: true })).toBeVisible();
 });
 
 test('new files replace only the selected pane temporary page', async ({ page }) => {
   await page.getByRole('treeitem', { name: 'a.md', exact: true }).click();
   await page.getByRole('button', { name: '左右分屏', exact: true }).click();
   await page.keyboard.press('w'); // Start this replacement scenario with an empty destination.
-  await pane(page, 1).getByRole('button', { name: '选择文件', exact: true }).click();
+  await pane(page, 1).getByRole('button', { name: '从侧栏选择', exact: true }).click();
   await page.getByRole('treeitem', { name: 'b.md', exact: true }).click();
   await page.getByRole('treeitem', { name: 'c.md', exact: true }).click();
   await expect(pane(page, 0).getByRole('tab')).toHaveText('a.md');
@@ -210,7 +210,7 @@ test('Alt history restores replaced text previews, isolates panes and truncates 
   await expect(first.getByRole('button', { name: '前进', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: '上下分屏', exact: true }).click();
   await page.keyboard.press('w');
-  await second.getByRole('button', { name: '选择文件', exact: true }).click();
+  await second.getByRole('button', { name: '从侧栏选择', exact: true }).click();
   await page.getByRole('treeitem', { name: 'a.md', exact: true }).click();
   await page.getByRole('treeitem', { name: 'c.md', exact: true }).click();
   await page.keyboard.press('Alt+ArrowLeft');
@@ -241,7 +241,7 @@ test('HTML focus routes shortcuts to its own pane, protects typing and supports 
   await page.keyboard.press('e');
   await second.getByRole('tab', { name: 'a.html', exact: true }).click();
   await page.keyboard.press('w');
-  await second.getByRole('button', { name: '选择文件', exact: true }).click();
+  await second.getByRole('button', { name: '从侧栏选择', exact: true }).click();
   await page.getByRole('treeitem', { name: 'b.html', exact: true }).click();
   await page.getByRole('treeitem', { name: 'c.html', exact: true }).click();
   await expect(second.locator('.bridge-state')).toHaveText('工作台快捷键优先');
@@ -289,7 +289,7 @@ test('more settings floats without resizing, closes outside and on Escape', asyn
   await page.getByRole('button', { name: '左右分屏', exact: true }).click();
   const first = pane(page, 0), second = pane(page, 1);
   await page.keyboard.press('w');
-  await second.getByRole('button', { name: '选择文件', exact: true }).click();
+  await second.getByRole('button', { name: '从侧栏选择', exact: true }).click();
   await page.getByRole('treeitem', { name: 'b.md', exact: true }).click();
   const before=await first.locator('.reader').boundingBox();
   await first.getByRole('button', { name: '更多设置' }).click();
