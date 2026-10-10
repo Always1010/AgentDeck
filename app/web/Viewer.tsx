@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Entry } from '../shared/model.js';
+import { entryFileEndpoint } from '../shared/model.js';
 import { api, ApiError } from './api.js';
 import { Icon, type IconName } from './Icon.js';
 import { restoreFocus, shortcutFor } from './shortcuts.js';
@@ -52,7 +53,7 @@ export function Viewer({fullPath,reselect,reveal,reloadRequest=0,acknowledge,doc
   const titleRef=useRef(titleChanged);titleRef.current=titleChanged;
   useEffect(()=>{if(entry)titleRef.current(entry.title);},[entry?.title]);
   const endpoint=`/api/entries/${encodeURIComponent(id)}`;
-  async function readResult(e:Entry,signal?:AbortSignal){return api<{text:string;fileVersion?:string}>(`/api/mounts/${e.mountId}/file?path=${encodeURIComponent(e.relativePath)}`,'GET',undefined,{signal});}
+  async function readResult(e:Entry,signal?:AbortSignal){return api<{text:string;fileVersion?:string}>(entryFileEndpoint(e,'file'),'GET',undefined,{signal});}
   async function read(e:Entry){return (await readResult(e)).text;}
   async function load(){const prefs=preferenceState();const preferenceRevision=prefs.revision;const task=loads.current.begin();sourceReads.current.cancel();setSourceLoading(false);setLoading(true);setError('');setLoadedVersion('');setHtmlLoaded(false);setImageLoaded(false);
     try{const e=await api<Entry>(endpoint,'GET',undefined,{signal:task.signal});if(!task.current())return;let contents='';let unsupported=false;const nextSource=sourceRef.current&&hasTextSource(e.format);
@@ -137,7 +138,7 @@ export function Viewer({fullPath,reselect,reveal,reloadRequest=0,acknowledge,doc
     });
     await state.queue;
   }
-  const download=entry?`/api/mounts/${entry.mountId}/download?path=${encodeURIComponent(entry.relativePath)}`:'';
+  const download=entry?entryFileEndpoint(entry,'download'):'';
   const actionDetails:Record<ToolbarAction,{label:string;tip:string;icon:IconName;disabled?:boolean;pressed?:boolean;href?:string;run?:()=>void;menuLabel?:string}>={
     refresh:{label:'刷新',tip:'刷新当前文件',icon:'refresh',disabled:loading,run:()=>void load()},
     favorite:{label:favorite?'取消收藏文件':'收藏文件',tip:favorite?'取消收藏':'收藏文件',icon:'star',pressed:favorite,run:toggleFavorite},

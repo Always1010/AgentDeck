@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Entry } from '../../shared/model.js';
+import { entryFileEndpoint, type Entry } from '../../shared/model.js';
 import type { ResourceVersionResult } from '../../shared/fileOperations.js';
 import { api } from '../api.js';
 
@@ -24,7 +24,7 @@ export function useResourceWatch({ entry, enabled, active, generation }: { entry
       if (checking || controller.signal.aborted || document.visibilityState !== 'visible') return;
       checking = true;
       try {
-        const result = await api<ResourceVersionResult>(`/api/mounts/${entry!.mountId}/resource-version?path=${encodeURIComponent(entry!.relativePath)}`, 'GET', undefined, { signal: controller.signal });
+        const result = await api<ResourceVersionResult>(entryFileEndpoint(entry!, 'resource-version'), 'GET', undefined, { signal: controller.signal });
         if (controller.signal.aborted) return;
         latest.current = result;
         if (!baseline.current) baseline.current = { key, version: result.version };
