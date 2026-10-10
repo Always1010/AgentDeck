@@ -397,3 +397,13 @@
 - 解决方案：仅更新此包的锁定版本、官方 tarball 和完整性校验为 1.2.2。已有本机 node_modules 的实际替换属于另行授权的环境变更，不由锁文件修改隐式执行。
 - 验证方式：官方包元数据与[安全公告](https://github.com/advisories/GHSA-68fv-2mgg-jv7q)核对；只读安装预演仅替换这一包；`npm audit --package-lock-only --registry=https://registry.npmjs.org` 为 0 项漏洞。本机已安装依赖状态由当前验证摘要单独说明。
 - 相关文件：package-lock.json、docs/TEST-RESULTS.md。
+
+## AD-033 — 百分号编码的 API 前缀绕过请求来源守卫
+
+- 日期：2026-10-10
+- 状态：已解决
+- 现象：`/%61pi/projects` 等编码路径能匹配管理 API，但未执行普通 `/api/` 路径上的来源和 JSON 变更检查。
+- 原因分析：守卫只检查原始 req.url 的字符串前缀，路由匹配会解码路径。
+- 解决方案：依据实际匹配 API 路由执行守卫，同时保留未知原始 `/api/` 路径保护。
+- 验证方式：安全相关 5 项单测和类型检查通过；编码 GET/POST 缺少可信来源或变更标记时拒绝且注册表不变，合法头仍成功。该回归证明服务端守卫缺口，不等同于已经证明浏览器可实施跨站写入。
+- 相关文件：app/server/server.ts、tests/security.test.ts。

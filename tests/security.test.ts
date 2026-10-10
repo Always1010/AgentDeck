@@ -27,3 +27,26 @@ test('Windows junction and case boundaries, sensitive roots and state ancestry',
   await expect(app.policy.root(temp)).rejects.toThrow();
 });
 
+test.each(['/%61pi/projects', '/%61%70%69/projects'])('encoded API route %s requires the same trusted headers as its canonical route', async url => {
+  const registry = structuredClone(app.registry.data);
+  const hostOnly = { host: headers.host };
+  const untrustedGet = await app.main.inject({ url, headers: hostOnly });
+  expect(untrustedGet.statusCode).toBe(403);
+  expect(untrustedGet.json().error.code).toBe('UNTRUSTED_ORIGIN');
+  const untrustedPost = await app.main.inject({ method: 'POST', url, headers: hostOnly, payload: { name: 'blocked' } });
+  expect(untrustedPost.statusCode).toBe(403);
+  expect(untrustedPost.json().error.code).toBe('UNTRUSTED_ORIGIN');
+  const missingToken = await app.main.inject({ method: 'POST', url, headers: { host: headers.host, origin: headers.origin, 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' }, payload: { name: 'blocked' } });
+  expect(missingToken.statusCode).toBe(403);
+  expect(missingToken.json().error.code).toBe('CSRF_REJECTED');
+  expect(app.registry.data).toEqual(registry);
+  expect((await app.main.inject({ url, headers })).statusCode).toBe(200);
+  expect((await app.main.inject({ method: 'POST', url, headers, payload: { name: 'trusted' } })).statusCode).toBe(200);
+  expect(app.registry.data.projects.map(project => project.name)).toContain('trusted');
+});
+
+test('unknown API paths retain their origin guard before returning a not-found response', async () => {
+  expect((await app.main.inject({ url: '/api/unknown', headers: { host: headers.host } })).statusCode).toBe(403);
+  expect((await app.main.inject({ url: '/api/unknown', headers })).statusCode).toBe(404);
+});
+
