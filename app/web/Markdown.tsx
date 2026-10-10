@@ -161,8 +161,8 @@ export function Markdown({ text, entry, previewOrigin, navigate, keyboardActive 
   const hasSections = headings.some(heading => heading.level === 2) || headings.filter(heading => heading.level === 1).length > 1;
   const [tocOpen, setTocOpen] = useState(true);
   const beforePrint = useRef<boolean[] | undefined>(undefined);
-  const base = previewOrigin + previewPath(entry.mountId, entry.relativePath);
-  const prefix = previewPath(entry.mountId, '');
+  const base = entry.previewUrl || previewOrigin + previewPath(entry.mountId, entry.relativePath);
+  const prefix = entry.sourceKey ? `/t/${entry.sourceKey}/` : previewPath(entry.mountId, '');
 
   useLayoutEffect(() => {
     const reader = article.current?.closest<HTMLElement>('.reader');

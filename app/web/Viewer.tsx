@@ -17,7 +17,7 @@ import { useResourceWatch } from './viewers/useResourceWatch.js';
 import './viewers/viewers.css';
 const toolbarActionOrder=['refresh','favorite','external','split','source','copy'] as const;
 type ToolbarAction=typeof toolbarActionOrder[number];
-export function Viewer({fullPath,reveal,reloadRequest=0,acknowledge,documentFontSize=14,keyboardActive=true,immersive=false,bridgeConfig,bridgeAction,focused,initialScroll,positionChanged,scope,id,active,titleChanged,tool,toggleTool,favorite,toggleFavorite,navigate,other}:{fullPath?:string;reveal?:()=>void;reloadRequest?:number;acknowledge?:(input:{id:string;version:string})=>Promise<void>;documentFontSize?:number;keyboardActive?:boolean;immersive?:boolean;bridgeConfig?:BridgeConfig;bridgeAction?:(action:BridgeAction)=>void;focused?:()=>void;initialScroll?:{x:number;y:number};positionChanged?:(position:{x:number;y:number})=>void;scope?:string;other?:()=>void;id:string;active:boolean;titleChanged:(title:string)=>void;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;navigate:(mountId:string,path:string)=>void}) {
+export function Viewer({fullPath,reselect,reveal,reloadRequest=0,acknowledge,documentFontSize=14,keyboardActive=true,immersive=false,bridgeConfig,bridgeAction,focused,initialScroll,positionChanged,scope,id,active,titleChanged,tool,toggleTool,favorite,toggleFavorite,navigate,other}:{fullPath?:string;reselect?:()=>void;reveal?:()=>void;reloadRequest?:number;acknowledge?:(input:{id:string;version:string})=>Promise<void>;documentFontSize?:number;keyboardActive?:boolean;immersive?:boolean;bridgeConfig?:BridgeConfig;bridgeAction?:(action:BridgeAction)=>void;focused?:()=>void;initialScroll?:{x:number;y:number};positionChanged?:(position:{x:number;y:number})=>void;scope?:string;other?:()=>void;id:string;active:boolean;titleChanged:(title:string)=>void;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;navigate:(mountId:string,path:string)=>void}) {
   const [entry,setEntry]=useState<Entry>();const [text,setText]=useState('');const [source,setSource]=useState(false);
   const [version,setVersion]=useState(0);const [pending,setPending]=useState('');const [error,setError]=useState('');
   const [loading,setLoading]=useState(false);const [settings,setSettings]=useState(false);const [downloadOnly,setDownloadOnly]=useState(false);
@@ -134,6 +134,7 @@ export function Viewer({fullPath,reveal,reloadRequest=0,acknowledge,documentFont
     <span aria-live="polite" className="sr-only">{copyStatus}</span>
     {settings&&active&&createPortal(<div className="viewer-popover" ref={menuRef} id={`viewer-settings-${scope}`} data-viewer-settings data-pane={scope?.replace('pane-','')} role="group" aria-label="更多设置" style={menuPosition}>
       {visibleActions<toolbarActionOrder.length&&<div className="viewer-overflow-actions" role="group" aria-label="收起的工具栏操作">{toolbarActionOrder.slice(visibleActions).map(action=>renderAction(action,true))}</div>}
+      {reselect&&<button onClick={()=>{setSettings(false);reselect();}}>重新选择文件</button>}
       {entry&&<>
       <div className="viewer-menu-secondary">
       {fullPath&&<button onClick={()=>{setSettings(false);void copyPath();}}>复制完整路径</button>}
@@ -150,7 +151,7 @@ export function Viewer({fullPath,reveal,reloadRequest=0,acknowledge,documentFont
     {pending&&<div className="notice" role="status">{pending}<button onClick={()=>void load()}>加载更新</button><button onClick={()=>setPending('')}>稍后</button></div>}
     {resources.change&&active&&!source&&<div className="notice" role="status">同目录资源有变化，可能影响当前页面。重新加载前请保存工具输入。<button disabled={loading} onClick={()=>void load()}>重新加载页面</button><button onClick={resources.dismiss}>忽略本次变化</button></div>}
     {resources.error&&active&&!source&&<div className="notice" role="status">{resources.error}</div>}
-    {error&&<div role="alert">{error}<button onClick={()=>void load()}>重试</button></div>}
+    {error&&<div role="alert">{error}<button onClick={()=>void load()}>重试</button>{reselect&&<button onClick={reselect}>重新选择文件</button>}</div>}
     {!entry?<div className="empty">{loading?'正在打开文件…':'文件暂不可用。旧收藏可在展开原目录后自动恢复。'}</div>:downloadOnly?<div className="empty"><p>此文件暂不支持文本预览，或超过 10 MiB。</p><a href={download} download>下载原文件</a></div>:<>
       {/^html?$/.test(entry.format)&&<HtmlViewer frame={bridge.frame} loaded={()=>{bridge.onLoad();setHtmlLoaded(true);}} source={source} key={`${id}:${version}`} title={entry.title} url={entry.previewUrl}/>}
       {isImageFormat(entry.format)&&!source&&<ImageViewer key={`${id}:${version}`} title={entry.title} url={versionedImageUrl(entry.previewUrl!,loadedVersion)} loaded={()=>setImageLoaded(true)}/>}

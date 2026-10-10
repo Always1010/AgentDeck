@@ -30,7 +30,8 @@ export function listTools(registry: RegistryData, aliases: Map<string, { mountId
   const result: ToolItem[] = [];
   for (const [id, oldTitle] of candidates) {
     const ref = parseFileReference(id)!;
-    if (!/\.html?$/i.test(ref.relativePath)) continue;
+    const source = registry.fileSources?.find(source => source.id === id);
+    if (!/\.html?$/i.test(source?.absolutePath || ref.relativePath)) continue;
     const prefs = registry.entryPreferences[id];
     if (prefs?.kind && prefs.kind !== 'tool') continue; // Explicit removal overrides legacy membership.
     const explicit = prefs?.kind === 'tool';

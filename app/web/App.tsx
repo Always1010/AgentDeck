@@ -4,6 +4,7 @@ import { Management } from './Management.js';
 import { Tree, FileIcon } from './Tree.js';
 import { fullFilePath, treeFileReference } from './fileLocations.js';
 import { ToolPicker } from './ToolPicker.js';
+import { FileOpenDialog } from './FileOpenDialog.js';
 import { Icon } from './Icon.js';
 import { Viewer } from './Viewer.js';
 import { api } from './api.js';
@@ -76,6 +77,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   const [closedPages, setClosedPages] = useState<ClosedPage[]>([]);
   const [showClosedPages, setShowClosedPages] = useState(false);
   const [showQuickOpen, setShowQuickOpen] = useState(false);
+  const [filePicker, setFilePicker] = useState<{ pane: PaneId; id?: string } | null>(null);
   const closedSequence = useRef(0);
   function activatePane(pane:PaneId){markActivity();dispatchWorkspace({type:'activate',pane});}
   function revealPane(pane:PaneId){
@@ -184,13 +186,30 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
   function open(id:string,keep=false,pane:PaneId=workspace.active){dispatchPages({type:'open',id:aliasesRef.current[id]||id,keep},pane);if(searchActive)finishSearch(false);if(matchMedia('(max-width: 640px)').matches)setCollapsed(true);}
   function browserUrl(id:string){const resolved=aliasesRef.current[id]||id;const source=data.fileSources?.find(source=>source.id===resolved);const ref=parseFileReference(resolved);return ref&&previewOrigin?previewOrigin+(source?filePreviewPath(source):previewPath(ref.mountId,ref.relativePath)):undefined;}
   function openFile(id:string,keep=false,pane:PaneId=workspace.active){
-    const path=parseFileReference(aliasesRef.current[id]||id)?.relativePath||'';
+    const path=fullFilePath(data,aliasesRef.current[id]||id)||parseFileReference(aliasesRef.current[id]||id)?.relativePath||'';
     if(htmlOpening==='browser'&&/\.html?$/i.test(path)){
       if(keep)return;
       const url=browserUrl(id);if(url)window.open(url,'_blank','noopener,noreferrer');else setError('HTML 预览地址尚未就绪，请稍后重试。');
       return;
     }
     open(id,keep,pane);
+  }
+  function reloadFileViews(id: string) {
+    setUpdateOpen(previous => {
+      const next = { ...previous };
+      for (const [paneId, pane] of Object.entries(workspace.panes)) if (pane.items.some(page => page.id === id)) {
+        const key = `${paneId}:${id}`; next[key] = (next[key] || 0) + 1;
+      }
+      return next;
+    });
+  }
+  async function navigateFile(id: string, mountId: string, path: string, pane: PaneId) {
+    activatePane(pane);
+    if (!data.fileSources?.some(source => source.id === id)) { openFile(fileReference(mountId, path), false, pane); return; }
+    try {
+      const result = await api<{ id: string }>(`/api/files/${encodeURIComponent(id)}/links`, 'POST', { path });
+      await reload(); open(result.id, false, pane);
+    } catch (error) { setError((error as Error).message); }
   }
   function openUpdate(item:FileUpdate){
     openFile(item.id);
@@ -303,6 +322,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
       <button aria-label="上下分屏" title="上下分屏 · O" onClick={()=>splitPane('rows')}>上下分屏</button>
       <button aria-label="左右分屏" title="左右分屏 · E" onClick={()=>splitPane('columns')}>左右分屏</button>
       <button aria-label={workspace.maximized===null?'最大化当前阅读区':'恢复分屏'} title="最大化 / 恢复 · X" disabled={Object.keys(workspace.panes).length===1} onClick={()=>dispatchWorkspace({type:'maximize',pane:workspace.active})}>{workspace.maximized===null?'最大化':'恢复分屏'}</button>
+      <button className="icon-button" aria-label="打开本机文件" data-tooltip="打开本机文件" onClick={() => setFilePicker({ pane: workspace.active })}><Icon name="folder"/></button>
       <button aria-label="快速打开" onClick={() => setShowQuickOpen(true)}>快速打开</button>
       <button aria-label="最近关闭" onClick={() => setShowClosedPages(true)}>最近关闭</button>
       </div>
@@ -349,7 +369,7 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
         return <section key={paneId} tabIndex={-1} style={style} className={`reading-pane ${workspace.active===paneId?'active-pane':''}`} data-pane={paneId} aria-label={`阅读区 ${paneId+1}`} hidden={!visible} inert={!visible} onPointerDownCapture={()=>activatePane(paneId)} onFocusCapture={()=>activatePane(paneId)}>
           <div className="pane-navigation"><span>阅读区 {paneId+1}</span><button aria-label="后退" title="上一个文件 · Alt＋←" disabled={history.index<=0} onClick={()=>dispatchWorkspace({type:'history',pane:paneId,direction:-1})}>←</button><button aria-label="前进" title="下一个文件 · Alt＋→" disabled={history.index>=history.entries.length-1} onClick={()=>dispatchWorkspace({type:'history',pane:paneId,direction:1})}>→</button><button className="pane-close" aria-label={`关闭阅读区 ${paneId+1}`} title="关闭阅读区 · Q" aria-keyshortcuts={shortcutsEnabled?'q':undefined} onClick={()=>requestClosePane(paneId)}><Icon name="close"/></button></div>
           {!!pane.items.length&&<PageTabs scope={scope} pages={pane.items} active={pane.active} snapshot={data} open={id=>open(id,false,paneId)} keep={id=>keepPage(id,paneId)} close={id=>closePreview(id,paneId)}/>}
-          {pane.items.length?pane.items.map(page=><Viewer fullPath={fullFilePath(data, page.id)} reveal={treeFileReference(data,page.id)?() => revealInTree(page.id):undefined} reloadRequest={updateOpen[`${paneId}:${page.id}`]||0} acknowledge={updates.acknowledge} documentFontSize={documentFontSize} keyboardActive={workspace.active===paneId} immersive={immersive} bridgeConfig={{mode:htmlKeys,singles:shortcutsEnabled,navigation:navigationEnabled,escape:immersive||searchActive||workspace.maximized!==null,active:!settingsPage&&!help&&!guide&&!manage&&!toolPicker&&!showQuickOpen&&!showClosedPages&&closingPane===null}} bridgeAction={action=>runAction(action,paneId)} focused={()=>activatePane(paneId)} initialScroll={positions.current.get(`${paneId}:${page.id}`)} positionChanged={position=>positionChanged(`${paneId}:${page.id}`,position)} scope={scope} key={page.id} id={page.id} active={visible&&page.id===pane.active} titleChanged={title=>dispatchPages({type:'title',id:page.id,title},paneId)} tool={!!registeredTool(page.id)} toggleTool={()=>void changeTool(page.id,!!registeredTool(page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} navigate={(mountId,path)=>{activatePane(paneId);openFile(fileReference(mountId,path),false,paneId);}} other={()=>openOther(page.id)}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>{Object.keys(workspace.panes).length===1?'打开报告，专注阅读。':'选择文件，开始对照。'}</h2><p>点击此阅读区，再从侧栏选择文件。双击文件保留标签。</p>{Object.keys(workspace.panes).length===1&&updates.snapshot.total>0&&<div className="empty-updates"><strong>更新未读 · {updates.snapshot.total}</strong>{updates.snapshot.items.slice(0,5).map(item=><button key={item.id} title={item.relativePath} onClick={()=>openUpdate(item)}>{item.kind==='added'?'新增':'更新'} · {item.relativePath}</button>)}</div>}{!data.projects.length&&<button className="primary" onClick={()=>setManage('new')}>挂载第一个目录</button>}<button onClick={()=>{activatePane(paneId);setImmersive(false);setCollapsed(false);}}>选择文件</button><button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
+          {pane.items.length?pane.items.map(page=><Viewer reselect={data.fileSources?.some(source=>source.id===page.id)?()=>setFilePicker({pane:paneId,id:page.id}):undefined} fullPath={fullFilePath(data, page.id)} reveal={treeFileReference(data,page.id)?() => revealInTree(page.id):undefined} reloadRequest={updateOpen[`${paneId}:${page.id}`]||0} acknowledge={updates.acknowledge} documentFontSize={documentFontSize} keyboardActive={workspace.active===paneId} immersive={immersive} bridgeConfig={{mode:htmlKeys,singles:shortcutsEnabled,navigation:navigationEnabled,escape:immersive||searchActive||workspace.maximized!==null,active:!settingsPage&&!help&&!guide&&!manage&&!toolPicker&&!filePicker&&!showQuickOpen&&!showClosedPages&&closingPane===null}} bridgeAction={action=>runAction(action,paneId)} focused={()=>activatePane(paneId)} initialScroll={positions.current.get(`${paneId}:${page.id}`)} positionChanged={position=>positionChanged(`${paneId}:${page.id}`,position)} scope={scope} key={page.id} id={page.id} active={visible&&page.id===pane.active} titleChanged={title=>dispatchPages({type:'title',id:page.id,title},paneId)} tool={!!registeredTool(page.id)} toggleTool={()=>void changeTool(page.id,!!registeredTool(page.id))} favorite={favorites.includes(page.id)} toggleFavorite={()=>favorite(page.id)} navigate={(mountId,path)=>void navigateFile(page.id,mountId,path,paneId)} other={()=>openOther(page.id)}/>):<section className="viewer"><div className="empty"><span className="eyebrow">AGENTDECK</span><h2>{Object.keys(workspace.panes).length===1?'打开报告，专注阅读。':'选择文件，开始对照。'}</h2><p>可以直接打开本机文件，或从侧栏选择。双击侧栏文件保留标签。</p>{Object.keys(workspace.panes).length===1&&updates.snapshot.total>0&&<div className="empty-updates"><strong>更新未读 · {updates.snapshot.total}</strong>{updates.snapshot.items.slice(0,5).map(item=><button key={item.id} title={item.relativePath} onClick={()=>openUpdate(item)}>{item.kind==='added'?'新增':'更新'} · {item.relativePath}</button>)}</div>}{!data.projects.length&&<button onClick={()=>setManage('new')}>挂载第一个目录</button>}<button className="primary" onClick={()=>setFilePicker({pane:paneId})}>打开本机文件</button><button onClick={()=>{activatePane(paneId);setImmersive(false);setCollapsed(false);}}>从侧栏选择</button><button className="help-entry" onClick={()=>setGuide(true)}>如何使用与协作</button></div></section>}
         </section>;
       }}
     </ReadingLayout>
@@ -358,6 +378,11 @@ function Workbench({session,startupError}:{session:ReadingSession|null;startupEr
     {error&&<div className="toast" role="alert">{error}<button onClick={()=>setError('')}>关闭</button></div>}
     {showClosedPages && <ClosedPages items={closedPages} open={reopenClosed} close={() => setShowClosedPages(false)}/>}
     {showQuickOpen && <QuickOpen snapshot={data} pages={Object.values(workspace.panes).flatMap(pane => pane.items)} favorites={favorites} tools={tools} open={quickOpenFile} reveal={revealInTree} close={() => setShowQuickOpen(false)}/>}
+    {filePicker && <FileOpenDialog source={data.fileSources?.find(source => source.id === filePicker.id)} htmlOnly={!!filePicker.id && !!registeredTool(filePicker.id)} close={() => setFilePicker(null)} opened={async id => {
+      await reload();
+      if (filePicker.id) reloadFileViews(id);
+      setImmersive(false); revealPane(filePicker.pane); open(id, true, filePicker.pane); focusPane(filePicker.pane, id);
+    }}/>}
     {manage&&<Management snapshot={data} project={data.projects.find(p=>p.id===manage)} close={()=>setManage(undefined)} saved={()=>{void reload();setRefresh(v=>v+1);}} removed={()=>{void reload();}}/>}
     {toolPicker&&<ToolPicker source={typeof toolPicker==='string'?data.fileSources?.find(source=>source.id===toolPicker):undefined} title={typeof toolPicker==='string'?tools.find(tool=>tool.id===toolPicker)?.title:undefined} close={()=>setToolPicker(false)} saved={(id,duplicate)=>{
       void reload();setQuery('');
