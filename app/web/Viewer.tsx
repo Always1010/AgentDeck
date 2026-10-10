@@ -17,6 +17,9 @@ import { useResourceWatch } from './viewers/useResourceWatch.js';
 import './viewers/viewers.css';
 const toolbarActionOrder=['refresh','favorite','external','split','source','copy'] as const;
 type ToolbarAction=typeof toolbarActionOrder[number];
+type EntryPreference=Pick<Entry,'title'|'kind'|'refreshMode'>;
+type PreferenceState={id:string;confirmed:Partial<EntryPreference>;versions:Partial<Record<keyof EntryPreference,number>>;revision:number;queue:Promise<void>};
+const newPreferenceState=(id:string):PreferenceState=>({id,confirmed:{},versions:{},revision:0,queue:Promise.resolve()});
 export function Viewer({fullPath,reselect,reveal,reloadRequest=0,acknowledge,documentFontSize=14,keyboardActive=true,immersive=false,bridgeConfig,bridgeAction,focused,initialScroll,positionChanged,scope,id,active,titleChanged,tool,toggleTool,favorite,toggleFavorite,navigate,other}:{fullPath?:string;reselect?:()=>void;reveal?:()=>void;reloadRequest?:number;acknowledge?:(input:{id:string;version:string})=>Promise<void>;documentFontSize?:number;keyboardActive?:boolean;immersive?:boolean;bridgeConfig?:BridgeConfig;bridgeAction?:(action:BridgeAction)=>void;focused?:()=>void;initialScroll?:{x:number;y:number};positionChanged?:(position:{x:number;y:number})=>void;scope?:string;other?:()=>void;id:string;active:boolean;titleChanged:(title:string)=>void;tool:boolean;toggleTool:()=>void;favorite:boolean;toggleFavorite:()=>void;navigate:(mountId:string,path:string)=>void}) {
   const [entry,setEntry]=useState<Entry>();const [text,setText]=useState('');const [source,setSource]=useState(false);
   const [version,setVersion]=useState(0);const [pending,setPending]=useState('');const [error,setError]=useState('');
@@ -42,6 +45,8 @@ export function Viewer({fullPath,reselect,reveal,reloadRequest=0,acknowledge,doc
   const bridge=useHtmlBridge({url:entry&&/^html?$/.test(entry.format)?entry.previewUrl:undefined,version,config:effectiveConfig,focus:()=>{setSettings(false);focused?.();},action:action=>{if(action==='escape'&&settings){setSettings(false);restoreFocus(settingsButton.current);}else bridgeAction?.(action);},position:initialPosition.current,positionChanged});
   const settingsButton=useRef<HTMLButtonElement>(null);const loads=useRef(new LatestRead());const sourceReads=useRef(new LatestRead());const live=useRef<Entry | undefined>(undefined);
   const activation=useRef<{id:string;reload:number}|undefined>(undefined);
+  const preferences=useRef(newPreferenceState(id));
+  function preferenceState(){if(preferences.current.id!==id)preferences.current=newPreferenceState(id);return preferences.current;}
   const sourceRef=useRef(source);sourceRef.current=source;
   const activeRef=useRef(active);activeRef.current=active;
   const titleRef=useRef(titleChanged);titleRef.current=titleChanged;
@@ -49,12 +54,13 @@ export function Viewer({fullPath,reselect,reveal,reloadRequest=0,acknowledge,doc
   const endpoint=`/api/entries/${encodeURIComponent(id)}`;
   async function readResult(e:Entry,signal?:AbortSignal){return api<{text:string;fileVersion?:string}>(`/api/mounts/${e.mountId}/file?path=${encodeURIComponent(e.relativePath)}`,'GET',undefined,{signal});}
   async function read(e:Entry){return (await readResult(e)).text;}
-  async function load(){const task=loads.current.begin();sourceReads.current.cancel();setSourceLoading(false);setLoading(true);setError('');setLoadedVersion('');setHtmlLoaded(false);setImageLoaded(false);
+  async function load(){const prefs=preferenceState();const preferenceRevision=prefs.revision;const task=loads.current.begin();sourceReads.current.cancel();setSourceLoading(false);setLoading(true);setError('');setLoadedVersion('');setHtmlLoaded(false);setImageLoaded(false);
     try{const e=await api<Entry>(endpoint,'GET',undefined,{signal:task.signal});if(!task.current())return;let contents='';let unsupported=false;
       if(/^html?$/.test(e.format)||isImageFormat(e.format)) {const response=await fetch(e.previewUrl!,{method:'HEAD',signal:task.signal});if(!task.current())return;if(!response.ok)throw new Error(`页面 HTTP ${response.status}`);if(sourceRef.current&&hasTextSource(e.format)){const result=await readResult(e,task.signal);contents=result.text;e.fileVersion=result.fileVersion;}}
       else try{const result=await readResult(e,task.signal);contents=result.text;e.fileVersion=result.fileVersion;}catch(error){if(error instanceof ApiError && (error.code==='NOT_TEXT'||error.code==='FILE_TOO_LARGE'))unsupported=true;else throw error;}
       if(!task.current())return;
-      live.current=e;setEntry(e);setText(contents);setDownloadOnly(unsupported);setPending('');setVersion(v=>v+1);setLoadedVersion(unsupported?'':e.fileVersion||'');
+      const recent=Object.fromEntries(Object.entries(prefs.confirmed).filter(([key])=>(prefs.versions[key as keyof EntryPreference]||0)>preferenceRevision));
+      const loaded={...e,...recent};live.current=loaded;setEntry(loaded);setText(contents);setDownloadOnly(unsupported);setPending('');setVersion(v=>v+1);setLoadedVersion(unsupported?'':e.fileVersion||'');
     }catch(error){if(task.current())setError((error as Error).message);}
     finally{if(task.current())setLoading(false);}
   }
@@ -65,7 +71,7 @@ export function Viewer({fullPath,reselect,reveal,reloadRequest=0,acknowledge,doc
     if(activation.current?.id===id&&activation.current.reload===reloadRequest)return;
     activation.current={id,reload:reloadRequest};void load();
   },[id,reloadRequest,active]);
-  useEffect(()=>()=>{loads.current.cancel();sourceReads.current.cancel();activation.current=undefined;},[id]);
+  useEffect(()=>()=>{loads.current.cancel();sourceReads.current.cancel();activation.current=undefined;preferences.current=newPreferenceState('');},[id]);
   useEffect(()=>{
     if(!acknowledge||!active||!pageVisible||loading||error||!loadedVersion||downloadOnly)return;
     if(entry&&/^html?$/.test(entry.format)&&!source&&(!htmlLoaded||bridge.status!=='ready'||bridge.documentVersion!==loadedVersion))return;
@@ -116,7 +122,21 @@ export function Viewer({fullPath,reselect,reveal,reloadRequest=0,acknowledge,doc
   }
   async function copyOriginal(){if(!entry)return;try{await navigator.clipboard.writeText(await read(entry));setCopyStatus('已复制原文');window.setTimeout(()=>setCopyStatus(''),2500);}catch(e){setError((e as Error).message);}}
   async function copyPath(){if(!fullPath)return;try{await navigator.clipboard.writeText(fullPath);setCopyStatus('已复制完整路径');window.setTimeout(()=>setCopyStatus(''),2500);}catch{setError('未能复制路径，请从更多菜单中选中完整路径后手动复制。');}}
-  async function preference(patch:Partial<Entry>){try{await api(`${endpoint}/preferences`,'PATCH',patch);const e=await api<Entry>(endpoint);live.current=e;setEntry(e);}catch(e){setError((e as Error).message);}}
+  async function preference(patch:Partial<EntryPreference>){
+    const state=preferenceState();
+    // Serialize writes as well as publication: an older PATCH must not win on disk.
+    state.queue=state.queue.then(async()=>{
+      try{
+        await api(`${endpoint}/preferences`,'PATCH',patch);
+        Object.assign(state.confirmed,patch);
+        state.revision++;for(const key of Object.keys(patch))state.versions[key as keyof EntryPreference]=state.revision;
+        if(preferences.current!==state||live.current?.id!==id)return;
+        // Keep the version of the content we actually loaded, including during reloads.
+        const current={...live.current,...patch};live.current=current;setEntry(current);
+      }catch(e){if(preferences.current===state)setError((e as Error).message);}
+    });
+    await state.queue;
+  }
   const download=entry?`/api/mounts/${entry.mountId}/download?path=${encodeURIComponent(entry.relativePath)}`:'';
   const actionDetails:Record<ToolbarAction,{label:string;tip:string;icon:IconName;disabled?:boolean;pressed?:boolean;href?:string;run?:()=>void;menuLabel?:string}>={
     refresh:{label:'刷新',tip:'刷新当前文件',icon:'refresh',disabled:loading,run:()=>void load()},
