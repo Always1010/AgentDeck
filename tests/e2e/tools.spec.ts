@@ -44,3 +44,20 @@ test('pasted paths deduplicate without replacing a custom title and moved files 
  await page.getByRole('treeitem',{name:'自定义工具',exact:true}).click();await expect(page.frameLocator('iframe').locator('p')).toHaveText('独立页面');
  expect((await json(page,'/api/tools')).find((tool:{title:string})=>tool.title==='自定义工具').id).toBe(registered.id);
 });
+
+test('relocated tools and replacement files stay distinct in the tree and local open',async({page})=>{
+ await page.setViewportSize({width:1440,height:900});
+ await page.evaluate(()=>localStorage.setItem('html.opening',JSON.stringify('workbench')));
+ const file=path.join(root,'collision.html'),moved=path.join(root,'relocated.htm');await fs.writeFile(file,'<p>旧工具内容</p>');
+ const original=(await json(page,'/api/tools','PUT',{absolutePath:file,title:'迁移工具'})).id;
+ await fs.rename(file,moved);await json(page,`/api/tools/${encodeURIComponent(original)}`,'PATCH',{absolutePath:moved});
+ await fs.writeFile(file,'<p>原位置的新文件</p>');await page.reload();
+ await page.getByRole('treeitem',{name:'工具项目',exact:true}).click();await page.getByRole('treeitem',{name:'collision.html',exact:true}).click();
+ await expect(page.frameLocator('iframe:visible').locator('p')).toHaveText('原位置的新文件');
+ const physical=new URL(page.url()).searchParams.get('entry');expect(physical).toMatch(/^mounted:/);
+ await page.getByRole('button',{name:'工具',exact:true}).click();await page.getByRole('treeitem',{name:'迁移工具',exact:true}).click();
+ await expect(page.frameLocator('iframe:visible').locator('p')).toHaveText('旧工具内容');expect(new URL(page.url()).searchParams.get('entry')).toBe(original);
+ await page.locator('.workspace-header').getByRole('button',{name:'打开本机文件',exact:true}).click();const dialog=page.getByRole('dialog',{name:'打开本机文件',exact:true});
+ await dialog.getByLabel('文件路径').fill(file);await dialog.getByRole('button',{name:'打开',exact:true}).click();
+ await expect(page.frameLocator('iframe:visible').locator('p')).toHaveText('原位置的新文件');expect(new URL(page.url()).searchParams.get('entry')).toBe(physical);
+});
