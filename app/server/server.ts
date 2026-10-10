@@ -108,7 +108,7 @@ export async function createWorkbench(options: { stateDir: string; port: number;
       reply.header('Cache-Control', 'no-store').header('X-Content-Type-Options', 'nosniff').header('Referrer-Policy', 'no-referrer').header('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), usb=(), payment=()');
       if (app === main) {
         reply.header('Content-Security-Policy', `default-src 'self'; script-src 'self'${options.dev ? " 'unsafe-inline'" : ''}; style-src 'self' 'unsafe-inline'; img-src 'self' ${previewOrigin} data:; frame-src ${previewOrigin}; connect-src 'self' ${previewOrigin}${options.dev ? ' ws://127.0.0.1:*' : ''}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'`);
-        if (req.url.startsWith('/api/')) {
+        if (req.routeOptions.url?.startsWith('/api/') || req.url.startsWith('/api/')) {
           const originHeader = req.headers.origin;
           const site = req.headers['sec-fetch-site'];
           if ((originHeader && originHeader !== mainOrigin) || site !== 'same-origin') throw new AppError('UNTRUSTED_ORIGIN', '仅允许主平台管理界面的同来源请求', 403);
