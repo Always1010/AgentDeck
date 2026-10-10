@@ -70,6 +70,19 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     for (const source of migrated) d.entryPreferences[source.id] = { ...d.entryPreferences[source.id], kind: 'tool', title: migrationTitles.get(source.id)! };
   });
   const sourceFor = (id: string) => registry.data.fileSources?.find(source => source.id === id);
+  function legacyBinding(m:Mount,rel:string,absolutePath:string) {
+    return {mountId:m.id,entryPath:rel,absolutePath,excludes:fileExcludes(m,rel)};
+  }
+  // Old records can only be bound when the original mounted address is still exact.
+  const bindings=(registry.data.fileSources||[]).flatMap(source=>{
+    if(source.legacyPreview)return [];
+    const ref=parseFileReference(source.id),m=ref&&registry.data.mounts.find(m=>m.id===ref.mountId);
+    if(!ref||!m)return [];
+    try{relative(ref.relativePath,false);}catch{return [];}
+    const original=path.resolve(m.absolutePath,ref.relativePath);
+    return inside(m.absolutePath,original)&&sameFile(original,source.absolutePath)?[{key:source.key,binding:legacyBinding(m,ref.relativePath,original)}]:[];
+  });
+  if(bindings.length)await registry.mutate(d=>{for(const value of bindings)d.fileSources!.find(source=>source.key===value.key)!.legacyPreview=value.binding;});
   const sourceByKey = (key: string) => { const source = registry.data.fileSources?.find(source => source.key === key); if (!source) throw new AppError('ENTRY_MISSING', '文件来源不存在', 404); return source; };
   function fileAccess(mountId: string, rel: string) {
     relative(rel, false);
@@ -305,7 +318,8 @@ export async function createWorkbench(options: { stateDir: string; port: number;
         const existingMount = d.mounts.find(m => inside(m.absolutePath, real));
         const candidate = preferredId || (existingMount ? fileReference(existingMount.id, path.relative(existingMount.absolutePath, real).split(path.sep).join('/')) : undefined);
         const id = candidate && !sources.some(source => source.id === candidate) ? candidate : fileReference(key, path.basename(real));
-        source = { key, id, absolutePath: real, ...(existingMount ? { excludes: fileExcludes(existingMount, path.relative(existingMount.absolutePath, real).split(path.sep).join('/')) } : {}) }; sources.push(source);
+        const rel=existingMount&&path.relative(existingMount.absolutePath,real).split(path.sep).join('/');
+        source = { key, id, absolutePath: real, ...(existingMount ? { excludes: fileExcludes(existingMount,rel!),legacyPreview:legacyBinding(existingMount,rel!,real) } : {}) }; sources.push(source);
       }
       d.entryPreferences[source.id] = { ...d.entryPreferences[source.id], kind: 'tool', ...(input.title ? { title: input.title } : !d.entryPreferences[source.id]?.title ? { title: existingTitle || defaultToolTitle(real) } : {}) };
       return { id: source.id, alreadyRegistered };
@@ -403,20 +417,27 @@ export async function createWorkbench(options: { stateDir: string; port: number;
     let m = registry.data.mounts.find(m => m.id === req.params.id && m.enabled);
     if (!m) {
       relative(rel, false);
-      const source = registry.data.fileSources?.find(source => {
-        const ref = parseFileReference(source.id)!;
-        const parent = path.posix.dirname(ref.relativePath);
-        const prefix = parent === '.' ? '' : `${parent}/`;
-        return ref.mountId === req.params.id && rel.startsWith(prefix) && (rel === ref.relativePath || !/\.html?$/i.test(rel));
+      const candidates=(registry.data.fileSources||[]).flatMap(source=>{
+        const binding=source.legacyPreview;
+        if(!binding||binding.mountId!==req.params.id)return [];
+        const parent=path.posix.dirname(binding.entryPath),prefix=parent==='.'?'':`${parent}/`;
+        if(!rel.startsWith(prefix)||(rel!==binding.entryPath&&/\.html?$/i.test(rel)))return [];
+        const scope=fileScope({...source,absolutePath:binding.absolutePath,excludes:binding.excludes});
+        const resource=rel===binding.entryPath?scope.entry:rel.slice(prefix.length);
+        return [{scope,resource,target:path.resolve(scope.absolutePath,resource)}];
       });
-      if (!source) m = mount(req.params.id);
-      else {
-        const ref = parseFileReference(source.id)!;
-        const parent = path.posix.dirname(ref.relativePath);
-        const prefix = parent === '.' ? '' : `${parent}/`;
-        m = fileScope(source);
-        rel = rel === ref.relativePath ? m.entry : rel.slice(prefix.length);
-        await policy.resolve(m, m.entry);
+      if(!candidates.length){
+        const unresolved=registry.data.fileSources?.some(source=>!source.legacyPreview&&parseFileReference(source.id)?.mountId===req.params.id);
+        if(unresolved)throw new AppError('LEGACY_PREVIEW_UNBOUND','旧预览地址无法确认原位置，请重新打开文件',409);
+        m=mount(req.params.id);
+      }else{
+        if(candidates.some(candidate=>!sameFile(candidate.target,candidates[0].target)))throw new AppError('LEGACY_PREVIEW_AMBIGUOUS','旧预览地址对应多个原位置，请重新打开文件',409);
+        // Missing original entries close their scope. Root ambiguity was checked first.
+        const ready:typeof candidates=[];
+        for(const candidate of candidates){try{await policy.resolve(candidate.scope,candidate.scope.entry,false,'file');ready.push(candidate);}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}}
+        if(!ready.length)throw new AppError('ENTRY_MISSING','原预览入口已不存在，请重新打开文件',404);
+        for(const candidate of ready)await policy.resolve(candidate.scope,candidate.resource);
+        m=ready[0].scope;rel=ready[0].resource;
       }
     }
     let file = await policy.resolve(m!, rel);
