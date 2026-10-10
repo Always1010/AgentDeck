@@ -121,6 +121,7 @@ test('HTML selection checks actual file types, sources, junctions and broad dire
 test('a relocated tool keeps its identity while the original mounted path opens its replacement', async () => {
   const oldId = fileReference(mountId, 'merge.html');
   await app.main.inject({ method: 'PUT', url: '/api/tools', headers, payload: { id: oldId, title: '原工具' } });
+  await app.updates.configure({ mode: 'allow', extensions: ['.html'], custom: [] });
   const movedRoot = path.join(temp, 'moved'); await fs.mkdir(movedRoot);
   const moved = path.join(movedRoot, 'renamed.htm'); await fs.rename(path.join(root, 'merge.html'), moved);
   await app.main.inject({ method: 'PATCH', url: `/api/tools/${encodeURIComponent(oldId)}`, headers, payload: { absolutePath: moved } });
@@ -153,6 +154,18 @@ test('a relocated tool keeps its identity while the original mounted path opens 
   const registered = (await app.main.inject({ method: 'PUT', url: '/api/tools', headers, payload: { id: physicalId } })).json();
   expect(registered.id).not.toBe(oldId); expect(registered.id).not.toBe(physicalId);
   expect((await getEntry(physicalId)).sourceKey).toBeUndefined();
+  const newSource = await getEntry(registered.id);
+  const loaded = (await app.main.inject({ url: entryFileEndpoint(newSource, 'file'), headers })).json();
+  // The same file may be watched by mounts in separate projects.
+  await app.main.inject({ method: 'POST', url: '/api/projects', headers, payload: { name: '重叠项目', mount: { label: '重叠目录', absolutePath: root } } });
+  await app.updates.reconcile();
+  await fs.writeFile(path.join(root, 'merge.html'), '<p>later replacement version</p>'); await app.updates.reconcile();
+  expect(app.updates.snapshot().total).toBe(2);
+  await app.main.inject({ method: 'POST', url: '/api/file-updates/read', headers, payload: { id: registered.id, version: loaded.fileVersion } });
+  expect(app.updates.snapshot().total).toBe(2);
+  const latest = (await app.main.inject({ url: entryFileEndpoint(newSource, 'file'), headers })).json();
+  await app.main.inject({ method: 'POST', url: '/api/file-updates/read', headers, payload: { id: registered.id, version: latest.fileVersion } });
+  expect(app.updates.snapshot().total).toBe(0);
   await app.main.inject({ method: 'PATCH', url: `/api/mounts/${mountId}`, headers, payload: { enabled: false } });
   expect((await app.main.inject({ url: entryFileEndpoint(source, 'file'), headers })).statusCode).toBe(200);
   expect((await app.main.inject({ url: entryFileEndpoint(replacement, 'file'), headers })).statusCode).toBe(410);
@@ -170,6 +183,16 @@ test('reading a relocated source cannot acknowledge unread content at its former
   // Even the replacement's exact version does not change the old source ID's meaning.
   await app.main.inject({ method: 'POST', url: '/api/file-updates/read', headers, payload: { id: oldId, version: unread.version } });
   expect(app.updates.snapshot().total).toBe(1);
+  const newRoot = path.join(temp, 'new-mount'); await fs.mkdir(newRoot);
+  const remounted = path.join(newRoot, 'moved.html'); await fs.rename(moved, remounted);
+  await app.main.inject({ method: 'PATCH', url: `/api/tools/${encodeURIComponent(oldId)}`, headers, payload: { absolutePath: remounted } });
+  await app.main.inject({ method: 'POST', url: '/api/projects', headers, payload: { name: '实际位置', mount: { label: '新挂载', absolutePath: newRoot } } });
+  await app.updates.reconcile(); await fs.writeFile(remounted, '<p>changed at the actual new mount</p>'); await app.updates.reconcile();
+  expect(app.updates.snapshot().total).toBe(2);
+  const relocated = (await app.main.inject({ url: `/api/entries/${encodeURIComponent(oldId)}`, headers })).json();
+  const loaded = (await app.main.inject({ url: entryFileEndpoint(relocated, 'file'), headers })).json();
+  await app.main.inject({ method: 'POST', url: '/api/file-updates/read', headers, payload: { id: oldId, version: loaded.fileVersion } });
+  expect(app.updates.snapshot().items.map(item => item.relativePath)).toEqual(['merge.html']);
   await app.main.inject({ method: 'POST', url: '/api/file-updates/read', headers, payload: { id: mountedReference(mountId, 'merge.html'), version: unread.version } });
   expect(app.updates.snapshot().total).toBe(0);
 });

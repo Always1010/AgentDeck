@@ -1,4 +1,4 @@
-import type { Snapshot } from '../shared/model.js';
+import { mountedFileReference, type Snapshot } from '../shared/model.js';
 import type { FileUpdate, UpdatesSnapshot } from '../shared/updates.js';
 import { isBoolean, usePreference } from './preferences.js';
 
@@ -21,7 +21,7 @@ export function UnreadFiles({snapshot,projects,error,ready,saving,open,acknowled
             <span className={`unread-kind ${item.kind}`}>{item.kind==='added'?'新增':'更新'}</span><span className="unread-name">{name}</span>
             <small className="unread-location">{location}</small><time dateTime={new Date(item.changedAt).toISOString()} title={new Date(item.changedAt).toLocaleString()}>{new Date(item.changedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</time>
           </button>
-          <button className="unread-mark" aria-label={`标为已读：${name}`} title="标为已读" onClick={()=>void acknowledge({id:item.id,version:item.version}).catch(()=>{})}>✓</button>
+          <button className="unread-mark" aria-label={`标为已读：${name}`} title="标为已读" onClick={()=>void acknowledge({id:mountedFileReference(projects,item.mountId,item.relativePath),version:item.version}).catch(()=>{})}>✓</button>
         </li>;
       })}</ul>
       {snapshot.total>snapshot.items.length&&<p className="unread-status">显示最近 {snapshot.items.length} 个，共 {snapshot.total} 个；读完后继续显示其余文件。</p>}

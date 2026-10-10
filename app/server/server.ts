@@ -141,9 +141,17 @@ export async function createWorkbench(options: { stateDir: string; port: number;
       const ref = parseFileReference(input.id);
       if (ref?.mounted) input.id = fileReference(ref.mountId, ref.relativePath);
       else if (ref && sourceFor(input.id)) {
-        // A stable source ID may retain a former mount path after relocation.
-        // Reading that independent file cannot acknowledge the replacement at the old path.
-        if (mountedFileReference(registry.data, ref.mountId, ref.relativePath) !== input.id) return updates.snapshot();
+        // A stable source ID describes the selected file, even after relocation.
+        // Confirm only records at its current physical path, never its old ID path.
+        const source = sourceFor(input.id)!;
+        const mounts = registry.data.mounts.filter(m => m.enabled && inside(m.absolutePath, source.absolutePath)).sort((a,b) => Number(b.id === ref.mountId) - Number(a.id === ref.mountId));
+        for (const m of mounts) {
+          const rel = path.relative(m.absolutePath, source.absolutePath).split(path.sep).join('/');
+          try { relative(rel, false); } catch { continue; }
+          if (!sameFile(path.resolve(m.absolutePath, rel), source.absolutePath)) continue;
+          await updates.acknowledge({ id: fileReference(m.id, rel), version: input.version });
+        }
+        return updates.snapshot();
       }
     }
     return updates.acknowledge(input);
