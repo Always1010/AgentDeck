@@ -1,15 +1,34 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api.js';
 import { Icon } from './Icon.js';
 import { Dialog } from './Dialog.js';
 import type { Mount, Project, Snapshot } from '../shared/model.js';
+import { LatestRead } from './viewers/requests.js';
 
 export function Picker({ initial, choose, close }: { initial: string; choose: (p: string) => void; close: () => void }) {
   const [locations, setLocations] = useState<string[]>([]); const [input, setInput] = useState(initial);
   const [listing, setListing] = useState<{current:string;parent:string;directories:{name:string;path:string}[]}>(); const [error, setError] = useState('');
-  async function browse(p: string) { try { const data = await api<NonNullable<typeof listing>>(`/api/fs/directories?absolutePath=${encodeURIComponent(p)}`); setListing(data); setInput(data.current); setError(''); } catch (e) { setError((e as Error).message); } }
-  useEffect(() => { void api<{locations:string[]}>('/api/fs/locations').then(d => { setLocations(d.locations); void browse(initial || d.locations[0]); }).catch(e => setError(e.message)); }, []);
-  return <Dialog label="选择本机目录" close={close} nested><h2>选择本机目录</h2><p>浏览的是运行服务的电脑；不会上传或复制文件。</p><div className="row">{locations.map(p => <button key={p} onClick={() => void browse(p)}>{p}</button>)}</div><form onSubmit={e => { e.preventDefault(); void browse(input); }}><label>当前位置<input data-autofocus value={input} onChange={e => setInput(e.target.value)} /></label><button>前往</button></form>{error && <p role="alert">{error}</p>}<button onClick={() => listing && void browse(listing.parent)}>↑ 上一级</button><div className="directory-list">{listing?.directories.map(d => <button key={d.path} onClick={() => void browse(d.path)}>▸ {d.name}</button>)}</div><footer><button onClick={close}>取消</button><button disabled={!listing} onClick={() => listing && choose(listing.current)}>选择此目录</button></footer></Dialog>;
+  const [loading, setLoading] = useState(false);
+  const reads = useRef(new LatestRead()); const mounted = useRef(true); const inputVersion = useRef(0); const navigated = useRef(false);
+  async function browse(p: string) {
+    const task = reads.current.begin(); const version = inputVersion.current; navigated.current = true;
+    setInput(p); setListing(undefined); setLoading(true); setError('');
+    try {
+      const data = await api<NonNullable<typeof listing>>(`/api/fs/directories?absolutePath=${encodeURIComponent(p)}`, 'GET', undefined, { signal: task.signal });
+      if (!mounted.current || !task.current()) return;
+      setListing(data); if (inputVersion.current === version) setInput(data.current);
+    } catch (e) { if (mounted.current && task.current()) setError((e as Error).message); }
+    finally { if (mounted.current && task.current()) setLoading(false); }
+  }
+  useEffect(() => {
+    mounted.current = true; const controller = new AbortController();
+    void api<{locations:string[]}>('/api/fs/locations', 'GET', undefined, { signal: controller.signal }).then(d => {
+      if (controller.signal.aborted) return;
+      setLocations(d.locations); if (!navigated.current && inputVersion.current === 0 && (initial || d.locations[0])) void browse(initial || d.locations[0]);
+    }).catch(e => { if (!controller.signal.aborted) setError(e.message); });
+    return () => { mounted.current = false; controller.abort(); reads.current.cancel(); };
+  }, []);
+  return <Dialog label="选择本机目录" close={close} nested><h2>选择本机目录</h2><p>浏览的是运行服务的电脑；不会上传或复制文件。</p><div className="row">{locations.map(p => <button key={p} onClick={() => void browse(p)}>{p}</button>)}</div><form onSubmit={e => { e.preventDefault(); void browse(input); }}><label>当前位置<input data-autofocus value={input} onChange={e => { inputVersion.current++; setInput(e.target.value); }} /></label><button disabled={!input.trim()}>前往</button></form>{error && <p role="alert">{error}</p>}<button disabled={!listing || loading || listing.current === listing.parent} onClick={() => listing && void browse(listing.parent)}>↑ 上一级</button><div className="directory-list" aria-busy={loading}>{loading ? <p>正在读取…</p> : listing?.directories.map(d => <button key={d.path} onClick={() => void browse(d.path)}>▸ {d.name}</button>)}</div><footer><button onClick={close}>取消</button><button disabled={!listing || loading} onClick={() => listing && choose(listing.current)}>选择此目录</button></footer></Dialog>;
 }
 export function Management({ snapshot, project, close, saved, removed }: { snapshot: Snapshot; project?: Project; close: () => void; saved: () => void; removed: () => void }) {
   const [name, setName] = useState(project?.name || ''); const [editing, setEditing] = useState<Mount>();
