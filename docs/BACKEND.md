@@ -69,7 +69,7 @@
 | `Project` | `id`、`name`、`order` |
 | `Mount` | `id`、`projectId`、`label`、`absolutePath`、`mode`、`toolDirectories`、`excludes`、`entry`、`enabled` |
 | `Entry` | `id`、`projectId`、`mountId`、`title`、`kind`、`format`、`relativePath`、`resourceRoot`、`updatedAt`、`fileVersion`、`refreshMode`、`status`、`previewUrl`、可选 `sourceKey`；是否能够预览仍取决于文件类型。 |
-| `FileSource` | `key`、`id`、`absolutePath`、可选 `excludes`；用于独立打开的文件与已登记工具，不是目录挂载。 |
+| `FileSource` | `key`、`id`、`absolutePath`、可选 `excludes` 和 `legacyPreview`；旧预览绑定保存原挂载、相对入口、物理入口与资源排除项，来源重定位不改变它。用于独立打开的文件与已登记工具，不是目录挂载。 |
 
 `mode` 仅为 `content`、`tool-library`、`single-tool`；`kind` 仅为 `html`、`tool`、`markdown`、`text`、`data`。新建挂载的默认值是 `mode: "content"`、`entry: "index.html"`、`toolDirectories: []`、`excludes: []`、`enabled: true`。
 
@@ -175,7 +175,7 @@
 - 不改写源文件，下载和源码读取保持原始内容；
 - 保留原编码，并只检查最多 64 KiB 的文档前缀来确定安全插入点；
 - `HEAD` 只返回头部，不传输正文；
-- 预览地址由文件元信息中的 `previewUrl` 提供。普通挂载文件使用 `/m/<mountId>/<相对路径>`；独立文件及已登记工具使用 `/t/<key>/<当前文件名>`，相邻资源按这个目录地址解析。原挂载移除或停用时，已打开的旧 `/m` 工具地址也可在对应工具来源范围内继续读取入口和资源，保持当前 iframe 实例。
+- 预览地址由文件元信息中的 `previewUrl` 提供。普通挂载文件使用 `/m/<mountId>/<相对路径>`；独立文件及已登记工具使用 `/t/<key>/<当前文件名>`，相邻资源按这个目录地址解析。原挂载移除或停用时，已打开的旧 `/m` 工具地址按不可变的原预览绑定读取原入口和资源。迁移工具后，旧地址不指向新目录；原入口缺失时关闭其资源范围。同一虚拟资源对应不同原位置时返回 `409 LEGACY_PREVIEW_AMBIGUOUS`。旧记录仅在当前来源与原挂载地址精准匹配时补绑定；无法确认原位置时返回 `409 LEGACY_PREVIEW_UNBOUND`，需重新打开文件取得 `/t` 地址。
 
 ## 5. 安全与运行限制
 
